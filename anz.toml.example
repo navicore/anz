@@ -1,0 +1,8 @@
+bind_address = "127.0.0.1:8080"
+issuer_base_url = "https://auth.navicore.tech"
+database_path = "anz.db"
+access_token_lifetime_secs = 3600
+id_token_lifetime_secs = 3600
+refresh_token_lifetime_secs = 2592000
+auth_code_lifetime_secs = 300
+session_lifetime_secs = 86400
