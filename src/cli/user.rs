@@ -49,11 +49,13 @@ pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
                 None => bail!("Realm '{realm}' not found"),
             };
 
-            let password = rpassword::prompt_password("Password: ")?;
+            eprint!("Password: ");
+            let password = rpassword::read_password()?;
             if password.is_empty() {
                 bail!("Password cannot be empty");
             }
-            let confirm = rpassword::prompt_password("Confirm password: ")?;
+            eprint!("Confirm password: ");
+            let confirm = rpassword::read_password()?;
             if password != confirm {
                 bail!("Passwords do not match");
             }
