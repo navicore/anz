@@ -77,7 +77,10 @@ pub async fn authorize_get(
         return Ok(Html(tmpl.render().unwrap_or_default()).into_response());
     }
 
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
@@ -86,7 +89,9 @@ pub async fn authorize_get(
         .ok_or_else(|| AppError::BadRequest("unknown client_id".to_string()))?;
 
     if !client.redirect_uris.contains(&q.redirect_uri) {
-        return Err(AppError::BadRequest("redirect_uri not registered".to_string()));
+        return Err(AppError::BadRequest(
+            "redirect_uri not registered".to_string(),
+        ));
     }
 
     // Check for existing session
@@ -113,9 +118,8 @@ pub async fn authorize_get(
 
     // No session — show login form
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie = format!(
-        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}"
-    );
+    let csrf_cookie =
+        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
 
     let tmpl = LoginTemplate {
         realm_name: realm,
@@ -131,7 +135,9 @@ pub async fn authorize_get(
         nonce: q.nonce,
     };
 
-    let html = tmpl.render().map_err(|e: askama::Error| AppError::Internal(e.to_string()))?;
+    let html = tmpl
+        .render()
+        .map_err(|e: askama::Error| AppError::Internal(e.to_string()))?;
     Ok(([(SET_COOKIE, csrf_cookie)], Html(html)).into_response())
 }
 
@@ -157,7 +163,10 @@ pub async fn authorize_post(
     headers: HeaderMap,
     Form(form): Form<AuthorizeForm>,
 ) -> Result<Response, AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
@@ -178,7 +187,9 @@ pub async fn authorize_post(
         .ok_or_else(|| AppError::BadRequest("unknown client_id".to_string()))?;
 
     if !client.redirect_uris.contains(&form.redirect_uri) {
-        return Err(AppError::BadRequest("redirect_uri not registered".to_string()));
+        return Err(AppError::BadRequest(
+            "redirect_uri not registered".to_string(),
+        ));
     }
 
     // Authenticate user
@@ -228,20 +239,15 @@ pub async fn authorize_post(
         nonce: form.nonce,
     };
 
-    let (redirect_response, _) = generate_auth_code_redirect_inner(
-        &conn, &state, &realm_obj.id, &q, &user.id,
-    )?;
+    let (redirect_response, _) =
+        generate_auth_code_redirect_inner(&conn, &state, &realm_obj.id, &q, &user.id)?;
 
     // Clear CSRF cookie, set session cookie
-    let clear_csrf = format!(
-        "anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0"
-    );
+    let clear_csrf =
+        format!("anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0");
 
     Ok((
-        [
-            (SET_COOKIE, session_cookie),
-            (SET_COOKIE, clear_csrf),
-        ],
+        [(SET_COOKIE, session_cookie), (SET_COOKIE, clear_csrf)],
         redirect_response,
     )
         .into_response())
@@ -301,9 +307,8 @@ fn render_login_error(
     error_msg: &str,
 ) -> Result<Response, AppError> {
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie = format!(
-        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}"
-    );
+    let csrf_cookie =
+        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
 
     let tmpl = LoginTemplate {
         realm_name: realm.to_string(),
@@ -319,7 +324,9 @@ fn render_login_error(
         nonce: form.nonce.clone(),
     };
 
-    let html = tmpl.render().map_err(|e: askama::Error| AppError::Internal(e.to_string()))?;
+    let html = tmpl
+        .render()
+        .map_err(|e: askama::Error| AppError::Internal(e.to_string()))?;
     Ok(([(SET_COOKIE, csrf_cookie)], Html(html)).into_response())
 }
 

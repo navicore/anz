@@ -52,8 +52,7 @@ pub fn list_realms(conn: &Connection) -> Result<Vec<Realm>> {
 }
 
 pub fn get_realm_by_name(conn: &Connection, name: &str) -> Result<Option<Realm>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, created_at FROM realms WHERE name = ?1")?;
+    let mut stmt = conn.prepare("SELECT id, name, created_at FROM realms WHERE name = ?1")?;
     let mut rows = stmt.query_map(params![name], |row| {
         let created_str: String = row.get(2)?;
         let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)

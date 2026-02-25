@@ -1,9 +1,9 @@
 use axum::extract::{Path, State};
-use axum::Json;
 use axum::Form;
+use axum::Json;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
 use rand::RngCore;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -28,7 +28,10 @@ pub async fn token(
     Path(realm): Path<String>,
     Form(form): Form<TokenRequest>,
 ) -> Result<Json<Value>, AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
@@ -36,9 +39,7 @@ pub async fn token(
         "authorization_code" => {
             handle_authorization_code(&conn, &state, &realm, &realm_obj.id, &form)
         }
-        "refresh_token" => {
-            handle_refresh_token(&conn, &state, &realm, &realm_obj.id, &form)
-        }
+        "refresh_token" => handle_refresh_token(&conn, &state, &realm, &realm_obj.id, &form),
         _ => Err(AppError::BadRequest("unsupported grant_type".to_string())),
     }
 }

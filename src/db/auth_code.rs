@@ -37,10 +37,7 @@ pub fn insert_auth_code(
 
 /// Consume an authorization code: look it up by hash, mark as used, return it.
 /// Returns None if not found, already used, or expired.
-pub fn consume_auth_code(
-    conn: &Connection,
-    code_hash: &str,
-) -> Result<Option<AuthorizationCode>> {
+pub fn consume_auth_code(conn: &Connection, code_hash: &str) -> Result<Option<AuthorizationCode>> {
     let now = Utc::now().to_rfc3339();
 
     let mut stmt = conn.prepare(

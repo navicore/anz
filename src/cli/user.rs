@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use anyhow::{bail, Result};
 use clap::Subcommand;
 use rusqlite::Connection;
@@ -50,11 +52,13 @@ pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
             };
 
             eprint!("Password: ");
+            std::io::stderr().flush()?;
             let password = rpassword::read_password()?;
             if password.is_empty() {
                 bail!("Password cannot be empty");
             }
             eprint!("Confirm password: ");
+            std::io::stderr().flush()?;
             let confirm = rpassword::read_password()?;
             if password != confirm {
                 bail!("Passwords do not match");
@@ -62,7 +66,10 @@ pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
 
             let pw_hash = hash_password(&password)?;
             let user = db::user::create_user(conn, &realm_obj.id, &username, &email, &pw_hash)?;
-            println!("Created user '{}' in realm '{}' (id: {})", user.username, realm, user.id);
+            println!(
+                "Created user '{}' in realm '{}' (id: {})",
+                user.username, realm, user.id
+            );
         }
         UserAction::List { realm } => {
             let realm_obj = db::realm::get_realm_by_name(conn, &realm)?;

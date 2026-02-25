@@ -33,10 +33,7 @@ pub fn insert_refresh_token(
 
 /// Consume a refresh token: look it up by hash, revoke it, return it.
 /// Returns None if not found, already revoked, or expired.
-pub fn consume_refresh_token(
-    conn: &Connection,
-    token_hash: &str,
-) -> Result<Option<RefreshToken>> {
+pub fn consume_refresh_token(conn: &Connection, token_hash: &str) -> Result<Option<RefreshToken>> {
     let now = Utc::now().to_rfc3339();
 
     let mut stmt = conn.prepare(

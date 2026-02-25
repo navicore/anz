@@ -67,7 +67,10 @@ impl Config {
         match Self::load(path) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!("Could not load config from {}: {e:#}; using defaults", path.display());
+                tracing::warn!(
+                    "Could not load config from {}: {e:#}; using defaults",
+                    path.display()
+                );
                 Self::default()
             }
         }
