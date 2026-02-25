@@ -12,7 +12,7 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 argon2 = "0.5"
 password-hash = "0.5"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
