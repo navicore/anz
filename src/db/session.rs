@@ -16,7 +16,14 @@ pub fn create_session(
     conn.execute(
         "INSERT INTO sessions (id, realm_id, user_id, session_token_hash, expires_at, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, realm_id, user_id, session_token_hash, expires_at.to_rfc3339(), now.to_rfc3339()],
+        params![
+            id,
+            realm_id,
+            user_id,
+            session_token_hash,
+            expires_at.to_rfc3339(),
+            now.to_rfc3339()
+        ],
     )?;
     Ok(Session {
         id,

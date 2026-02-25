@@ -15,7 +15,10 @@ pub async fn userinfo(
 ) -> Result<Json<Value>, AppError> {
     let bearer = extract_bearer(&headers)?;
 
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 

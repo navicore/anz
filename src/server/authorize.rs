@@ -77,7 +77,10 @@ pub async fn authorize_get(
         return Ok(Html(tmpl.render().unwrap_or_default()).into_response());
     }
 
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
@@ -86,7 +89,9 @@ pub async fn authorize_get(
         .ok_or_else(|| AppError::BadRequest("unknown client_id".to_string()))?;
 
     if !client.redirect_uris.contains(&q.redirect_uri) {
-        return Err(AppError::BadRequest("redirect_uri not registered".to_string()));
+        return Err(AppError::BadRequest(
+            "redirect_uri not registered".to_string(),
+        ));
     }
 
     // Check for existing session
@@ -94,7 +99,7 @@ pub async fn authorize_get(
     if let Some(cookie_header) = headers.get(axum::http::header::COOKIE) {
         if let Ok(cookies) = cookie_header.to_str() {
             if let Some(session_token) = extract_cookie(cookies, &session_cookie_name) {
-                let token_hash = hex::encode(Sha256::digest(session_token.as_bytes()));
+                let token_hash = hex::encode(Sha256::digest(session_token.as_bytes()).as_slice());
                 if let Ok(Some(session)) =
                     db::session::get_session_by_token_hash(&conn, &realm_obj.id, &token_hash)
                 {
@@ -113,9 +118,8 @@ pub async fn authorize_get(
 
     // No session — show login form
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie = format!(
-        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}"
-    );
+    let csrf_cookie =
+        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
 
     let tmpl = LoginTemplate {
         realm_name: realm,
@@ -131,7 +135,9 @@ pub async fn authorize_get(
         nonce: q.nonce,
     };
 
-    let html = tmpl.render().map_err(|e| AppError::Internal(e.to_string()))?;
+    let html = tmpl
+        .render()
+        .map_err(|e: askama::Error| AppError::Internal(e.to_string()))?;
     Ok(([(SET_COOKIE, csrf_cookie)], Html(html)).into_response())
 }
 
@@ -157,7 +163,10 @@ pub async fn authorize_post(
     headers: HeaderMap,
     Form(form): Form<AuthorizeForm>,
 ) -> Result<Response, AppError> {
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
@@ -178,7 +187,9 @@ pub async fn authorize_post(
         .ok_or_else(|| AppError::BadRequest("unknown client_id".to_string()))?;
 
     if !client.redirect_uris.contains(&form.redirect_uri) {
-        return Err(AppError::BadRequest("redirect_uri not registered".to_string()));
+        return Err(AppError::BadRequest(
+            "redirect_uri not registered".to_string(),
+        ));
     }
 
     // Authenticate user
@@ -200,7 +211,7 @@ pub async fn authorize_post(
 
     // Create session
     let session_token = generate_random_token();
-    let session_token_hash = hex::encode(Sha256::digest(session_token.as_bytes()));
+    let session_token_hash = hex::encode(Sha256::digest(session_token.as_bytes()).as_slice());
     let session_lifetime = Duration::seconds(state.config.session_lifetime_secs as i64);
     let session_expires = Utc::now() + session_lifetime;
     db::session::create_session(
@@ -228,20 +239,15 @@ pub async fn authorize_post(
         nonce: form.nonce,
     };
 
-    let (redirect_response, _) = generate_auth_code_redirect_inner(
-        &conn, &state, &realm_obj.id, &q, &user.id,
-    )?;
+    let (redirect_response, _) =
+        generate_auth_code_redirect_inner(&conn, &state, &realm_obj.id, &q, &user.id)?;
 
     // Clear CSRF cookie, set session cookie
-    let clear_csrf = format!(
-        "anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0"
-    );
+    let clear_csrf =
+        format!("anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0");
 
     Ok((
-        [
-            (SET_COOKIE, session_cookie),
-            (SET_COOKIE, clear_csrf),
-        ],
+        [(SET_COOKIE, session_cookie), (SET_COOKIE, clear_csrf)],
         redirect_response,
     )
         .into_response())
@@ -266,7 +272,7 @@ fn generate_auth_code_redirect_inner(
     user_id: &str,
 ) -> Result<(Redirect, String), AppError> {
     let raw_code = generate_random_token();
-    let code_hash = hex::encode(Sha256::digest(raw_code.as_bytes()));
+    let code_hash = hex::encode(Sha256::digest(raw_code.as_bytes()).as_slice());
 
     let lifetime = Duration::seconds(state.config.auth_code_lifetime_secs as i64);
     let expires_at = Utc::now() + lifetime;
@@ -284,12 +290,13 @@ fn generate_auth_code_redirect_inner(
     )?;
 
     let state_param = q.state.as_deref().unwrap_or("");
-    let redirect_url = format!(
-        "{}?code={}&state={}",
-        q.redirect_uri,
-        urlencoding::encode(&raw_code),
-        urlencoding::encode(state_param),
-    );
+    let mut redirect_parsed = url::Url::parse(&q.redirect_uri)
+        .map_err(|e| AppError::Internal(format!("invalid redirect_uri: {e}")))?;
+    redirect_parsed
+        .query_pairs_mut()
+        .append_pair("code", &raw_code)
+        .append_pair("state", state_param);
+    let redirect_url = redirect_parsed.to_string();
 
     Ok((Redirect::to(&redirect_url), raw_code))
 }
@@ -300,9 +307,8 @@ fn render_login_error(
     error_msg: &str,
 ) -> Result<Response, AppError> {
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie = format!(
-        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}"
-    );
+    let csrf_cookie =
+        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
 
     let tmpl = LoginTemplate {
         realm_name: realm.to_string(),
@@ -318,7 +324,9 @@ fn render_login_error(
         nonce: form.nonce.clone(),
     };
 
-    let html = tmpl.render().map_err(|e| AppError::Internal(e.to_string()))?;
+    let html = tmpl
+        .render()
+        .map_err(|e: askama::Error| AppError::Internal(e.to_string()))?;
     Ok(([(SET_COOKIE, csrf_cookie)], Html(html)).into_response())
 }
 

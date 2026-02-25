@@ -17,4 +17,9 @@ Thumbs.db
 
 # Cargo lock for libraries
 # Cargo.lock
-EOF < /dev/null
+
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+*.db-journal

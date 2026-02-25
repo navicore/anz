@@ -26,6 +26,7 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 /// Perform a dummy hash to prevent timing oracle on unknown usernames.
 pub fn dummy_verify() {
-    let dummy_hash = "$argon2id$v=19$m=19456,t=2,p=1$dW5rbm93bg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    let dummy_hash =
+        "$argon2id$v=19$m=19456,t=2,p=1$dW5rbm93bg$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let _ = verify_password("dummy", dummy_hash);
 }

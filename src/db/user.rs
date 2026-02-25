@@ -16,7 +16,15 @@ pub fn create_user(
     conn.execute(
         "INSERT INTO users (id, realm_id, username, email, password_hash, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, realm_id, username, email, password_hash, now.to_rfc3339(), now.to_rfc3339()],
+        params![
+            id,
+            realm_id,
+            username,
+            email,
+            password_hash,
+            now.to_rfc3339(),
+            now.to_rfc3339()
+        ],
     )?;
     Ok(User {
         id,

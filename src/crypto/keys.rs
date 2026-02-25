@@ -13,8 +13,8 @@ pub fn generate_ed25519_keypair() -> Result<(String, String, String)> {
     let private_pem = signing_key
         .to_pkcs8_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF)?
         .to_string();
-    let public_pem = verifying_key
-        .to_public_key_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF)?;
+    let public_pem =
+        verifying_key.to_public_key_pem(ed25519_dalek::pkcs8::spki::der::pem::LineEnding::LF)?;
 
     let kid = uuid::Uuid::new_v4().to_string();
 

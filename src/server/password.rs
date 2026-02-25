@@ -24,7 +24,10 @@ pub async fn change_password(
     // Validate bearer token
     let bearer = extract_bearer(&headers)?;
 
-    let conn = state.db.lock().map_err(|e| AppError::Internal(e.to_string()))?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
@@ -43,12 +46,14 @@ pub async fn change_password(
 
     // Verify current password
     if !pw::verify_password(&body.current_password, &user.password_hash) {
-        return Err(AppError::BadRequest("current password is incorrect".to_string()));
+        return Err(AppError::BadRequest(
+            "current password is incorrect".to_string(),
+        ));
     }
 
     // Hash and update new password
-    let new_hash = pw::hash_password(&body.new_password)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let new_hash =
+        pw::hash_password(&body.new_password).map_err(|e| AppError::Internal(e.to_string()))?;
     db::user::update_password(&conn, &user.id, &new_hash)?;
 
     Ok(Json(json!({ "status": "password updated" })))

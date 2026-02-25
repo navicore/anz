@@ -18,7 +18,14 @@ pub fn create_client(
     conn.execute(
         "INSERT INTO clients (id, realm_id, client_id, redirect_uris, allowed_scopes, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, realm_id, client_id, uris_json, scopes_json, now.to_rfc3339()],
+        params![
+            id,
+            realm_id,
+            client_id,
+            uris_json,
+            scopes_json,
+            now.to_rfc3339()
+        ],
     )?;
 
     Ok(Client {

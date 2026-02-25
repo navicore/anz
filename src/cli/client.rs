@@ -48,8 +48,7 @@ pub fn handle(action: ClientAction, conn: &Connection) -> Result<()> {
                 None => bail!("Realm '{realm}' not found"),
             };
 
-            let client =
-                db::client::create_client(conn, &realm_obj.id, &client_id, &redirect_uri)?;
+            let client = db::client::create_client(conn, &realm_obj.id, &client_id, &redirect_uri)?;
             println!(
                 "Created client '{}' in realm '{}' (id: {})",
                 client.client_id, realm, client.id
