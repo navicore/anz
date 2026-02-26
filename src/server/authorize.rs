@@ -279,14 +279,16 @@ fn generate_auth_code_redirect_inner(
 
     db::auth_code::insert_auth_code(
         conn,
-        realm_id,
-        &q.client_id,
-        user_id,
-        &code_hash,
-        &q.redirect_uri,
-        q.scope.as_deref().unwrap_or("openid"),
-        q.code_challenge.as_deref().unwrap_or(""),
-        expires_at,
+        &db::auth_code::NewAuthCode {
+            realm_id,
+            client_id: &q.client_id,
+            user_id,
+            code_hash: &code_hash,
+            redirect_uri: &q.redirect_uri,
+            scopes: q.scope.as_deref().unwrap_or("openid"),
+            code_challenge: q.code_challenge.as_deref().unwrap_or(""),
+            expires_at,
+        },
     )?;
 
     let state_param = q.state.as_deref().unwrap_or("");
@@ -336,7 +338,7 @@ fn generate_random_token() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn extract_cookie<'a>(cookies: &'a str, name: &str) -> Option<String> {
+fn extract_cookie(cookies: &str, name: &str) -> Option<String> {
     for part in cookies.split(';') {
         let part = part.trim();
         if let Some(value) = part.strip_prefix(&format!("{name}=")) {

@@ -19,7 +19,6 @@ pub struct TokenRequest {
     pub code: Option<String>,
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
-    pub client_id: Option<String>,
     pub refresh_token: Option<String>,
 }
 

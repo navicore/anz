@@ -1,6 +1,6 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
+use ed25519_dalek::pkcs8::{DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde_json::{json, Value};
 
@@ -45,11 +45,5 @@ pub fn encoding_key_from_pem(private_key_pem: &str) -> Result<jsonwebtoken::Enco
 /// Create a jsonwebtoken DecodingKey from an SPKI PEM public key.
 pub fn decoding_key_from_pem(public_key_pem: &str) -> Result<jsonwebtoken::DecodingKey> {
     let key = jsonwebtoken::DecodingKey::from_ed_pem(public_key_pem.as_bytes())?;
-    Ok(key)
-}
-
-/// Load a signing key from PKCS#8 PEM. Used to verify the key is valid.
-pub fn load_signing_key(private_key_pem: &str) -> Result<SigningKey> {
-    let key = SigningKey::from_pkcs8_pem(private_key_pem)?;
     Ok(key)
 }

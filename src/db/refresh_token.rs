@@ -37,23 +37,16 @@ pub fn consume_refresh_token(conn: &Connection, token_hash: &str) -> Result<Opti
     let now = Utc::now().to_rfc3339();
 
     let mut stmt = conn.prepare(
-        "SELECT id, realm_id, client_id, user_id, token_hash, scopes, expires_at, revoked
+        "SELECT id, client_id, user_id, scopes
          FROM refresh_tokens
          WHERE token_hash = ?1 AND revoked = 0 AND expires_at > ?2",
     )?;
     let mut rows = stmt.query_map(params![token_hash, now], |row| {
-        let expires_str: String = row.get(6)?;
         Ok(RefreshToken {
             id: row.get(0)?,
-            realm_id: row.get(1)?,
-            client_id: row.get(2)?,
-            user_id: row.get(3)?,
-            token_hash: row.get(4)?,
-            scopes: row.get(5)?,
-            expires_at: chrono::DateTime::parse_from_rfc3339(&expires_str)
-                .unwrap_or_default()
-                .with_timezone(&Utc),
-            revoked: false,
+            client_id: row.get(1)?,
+            user_id: row.get(2)?,
+            scopes: row.get(3)?,
         })
     })?;
 

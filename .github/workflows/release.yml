@@ -1,5 +1,8 @@
 name: Release
 
+# IMPORTANT: This workflow ONLY calls `just` commands for build/test/lint.
+# The justfile is the source of truth - no duplicated cargo commands here.
+
 on:
   release:
     types: [created]
@@ -22,14 +25,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Install Just
+        uses: extractions/setup-just@v2
 
-      - name: Clippy (strict)
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Run tests
-        run: cargo test --all-targets
+      - name: Run CI checks (just ci)
+        run: just ci
 
   version:
     needs: test

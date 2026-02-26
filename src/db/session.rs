@@ -26,12 +26,7 @@ pub fn create_session(
         ],
     )?;
     Ok(Session {
-        id,
-        realm_id: realm_id.to_string(),
         user_id: user_id.to_string(),
-        session_token_hash: session_token_hash.to_string(),
-        expires_at,
-        created_at: now,
     })
 }
 
@@ -42,24 +37,13 @@ pub fn get_session_by_token_hash(
 ) -> Result<Option<Session>> {
     let now = Utc::now().to_rfc3339();
     let mut stmt = conn.prepare(
-        "SELECT id, realm_id, user_id, session_token_hash, expires_at, created_at
+        "SELECT user_id
          FROM sessions
          WHERE realm_id = ?1 AND session_token_hash = ?2 AND expires_at > ?3",
     )?;
     let mut rows = stmt.query_map(params![realm_id, token_hash, now], |row| {
-        let expires_str: String = row.get(4)?;
-        let created_str: String = row.get(5)?;
         Ok(Session {
-            id: row.get(0)?,
-            realm_id: row.get(1)?,
-            user_id: row.get(2)?,
-            session_token_hash: row.get(3)?,
-            expires_at: chrono::DateTime::parse_from_rfc3339(&expires_str)
-                .unwrap_or_default()
-                .with_timezone(&Utc),
-            created_at: chrono::DateTime::parse_from_rfc3339(&created_str)
-                .unwrap_or_default()
-                .with_timezone(&Utc),
+            user_id: row.get(0)?,
         })
     })?;
     match rows.next() {

@@ -10,9 +10,3 @@ pub fn verify_s256(code_verifier: &str, code_challenge: &str) -> bool {
 
     computed.as_bytes().ct_eq(code_challenge.as_bytes()).into()
 }
-
-/// Compute the S256 code challenge from a code verifier.
-pub fn compute_s256(code_verifier: &str) -> String {
-    let hash = Sha256::digest(code_verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(hash)
-}
