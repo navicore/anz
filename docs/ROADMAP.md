@@ -2,7 +2,17 @@
 
 ## Current State
 
-anz implements a working OIDC authorization code flow with PKCE, refresh token rotation, and RFC 7009 token revocation. Phase 2 work (currently in progress on the `phase-2` branch) adds session management, audit logging, per-realm branding, token revocation, and a static file server for branding assets.
+anz implements a complete OIDC authorization code flow with PKCE, including:
+
+- Multi-realm identity isolation
+- Ed25519 JWT signing (per-realm keys)
+- Argon2id password hashing with timing-oracle prevention
+- Refresh token rotation with RFC 7009 revocation
+- Per-IP login rate limiting
+- JSON-line audit logging for security events
+- Per-realm branding (customizable login page)
+- Session management CLI (list, revoke, cleanup)
+- 53 unit tests covering crypto, DB, config, audit, branding, and rate limiting
 
 ## Known Gaps
 

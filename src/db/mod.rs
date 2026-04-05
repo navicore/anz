@@ -21,3 +21,12 @@ pub fn open_database(path: &Path) -> Result<Connection> {
 
     Ok(conn)
 }
+
+/// Create an in-memory database with migrations applied. Used for testing.
+#[cfg(test)]
+pub fn open_in_memory() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    migrations::run_migrations(&conn)?;
+    Ok(conn)
+}

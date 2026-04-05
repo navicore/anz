@@ -10,3 +10,22 @@ pub fn verify_s256(code_verifier: &str, code_challenge: &str) -> bool {
 
     computed.as_bytes().ct_eq(code_challenge.as_bytes()).into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_s256_verifies() {
+        // RFC 7636 Appendix B test vector
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+        assert!(verify_s256(verifier, challenge));
+    }
+
+    #[test]
+    fn wrong_verifier_fails() {
+        let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+        assert!(!verify_s256("wrong-verifier", challenge));
+    }
+}

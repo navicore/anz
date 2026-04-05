@@ -72,3 +72,60 @@ pub fn revoke_refresh_token_by_hash(conn: &Connection, token_hash: &str) -> Resu
     )?;
     Ok(count > 0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use chrono::Duration;
+
+    fn setup() -> (Connection, String, String) {
+        let conn = db::open_in_memory().unwrap();
+        let realm = db::realm::create_realm(&conn, "test").unwrap();
+        let user = db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash").unwrap();
+        (conn, realm.id, user.id)
+    }
+
+    #[test]
+    fn insert_and_consume_refresh_token() {
+        let (conn, realm_id, user_id) = setup();
+        let expires = Utc::now() + Duration::days(30);
+        insert_refresh_token(
+            &conn,
+            &realm_id,
+            "myapp",
+            &user_id,
+            "tokenhash",
+            "openid",
+            expires,
+        )
+        .unwrap();
+
+        let consumed = consume_refresh_token(&conn, "tokenhash").unwrap().unwrap();
+        assert_eq!(consumed.user_id, user_id);
+        assert_eq!(consumed.client_id, "myapp");
+    }
+
+    #[test]
+    fn consumed_token_cannot_be_reused() {
+        let (conn, realm_id, user_id) = setup();
+        let expires = Utc::now() + Duration::days(30);
+        insert_refresh_token(&conn, &realm_id, "app", &user_id, "once", "openid", expires).unwrap();
+
+        consume_refresh_token(&conn, "once").unwrap().unwrap();
+        assert!(consume_refresh_token(&conn, "once").unwrap().is_none());
+    }
+
+    #[test]
+    fn revoke_by_hash() {
+        let (conn, realm_id, user_id) = setup();
+        let expires = Utc::now() + Duration::days(30);
+        insert_refresh_token(&conn, &realm_id, "app", &user_id, "rev", "openid", expires).unwrap();
+
+        assert!(revoke_refresh_token_by_hash(&conn, "rev").unwrap());
+        // Already revoked
+        assert!(!revoke_refresh_token_by_hash(&conn, "rev").unwrap());
+        // Cannot consume revoked token
+        assert!(consume_refresh_token(&conn, "rev").unwrap().is_none());
+    }
+}

@@ -16,9 +16,12 @@ a reverse proxy and protect a handful of personal apps.
 - **OIDC authorization code flow** with PKCE
 - **Ed25519 signing** (per-realm keys)
 - **Argon2id** password hashing
-- **Refresh token rotation**
+- **Refresh token rotation** with RFC 7009 revocation
+- **Rate limiting** — per-IP login attempt throttling
+- **Audit logging** — JSON-line event log for login, token, and session activity
+- **Per-realm branding** — customizable login page (colors, logo, CSS)
 - **Minimal login UI** — server-rendered HTML, no JavaScript frameworks
-- **CLI admin** — no admin web UI, just `anz realm/user/client` commands
+- **CLI admin** — no admin web UI, just `anz realm/user/client/session` commands
 - **SQLite** — single file, embedded, no external database
 
 ## Quick Start
@@ -57,6 +60,7 @@ All endpoints are realm-scoped:
 | Token | `POST /realms/{realm}/token` |
 | UserInfo | `GET /realms/{realm}/userinfo` |
 | Password | `POST /realms/{realm}/password` |
+| Revoke | `POST /realms/{realm}/revoke` |
 
 ## CLI
 
@@ -70,6 +74,9 @@ anz user remove --realm <r> --username <u>
 anz client add --realm <r> --client-id <id> --redirect-uri <uri>
 anz client list --realm <r>
 anz client remove --realm <r> --client-id <id>
+anz session list --realm <r> --username <u>
+anz session revoke --realm <r> --username <u>
+anz session cleanup
 anz serve
 ```
 

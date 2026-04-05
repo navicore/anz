@@ -47,3 +47,33 @@ pub fn decoding_key_from_pem(public_key_pem: &str) -> Result<jsonwebtoken::Decod
     let key = jsonwebtoken::DecodingKey::from_ed_pem(public_key_pem.as_bytes())?;
     Ok(key)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_keypair_produces_valid_pem() {
+        let (priv_pem, pub_pem, kid) = generate_ed25519_keypair().unwrap();
+        assert!(priv_pem.contains("PRIVATE KEY"));
+        assert!(pub_pem.contains("PUBLIC KEY"));
+        assert!(!kid.is_empty());
+    }
+
+    #[test]
+    fn public_key_to_jwk_roundtrip() {
+        let (_priv_pem, pub_pem, kid) = generate_ed25519_keypair().unwrap();
+        let jwk = public_key_to_jwk(&pub_pem, &kid).unwrap();
+        assert_eq!(jwk["kty"], "OKP");
+        assert_eq!(jwk["crv"], "Ed25519");
+        assert_eq!(jwk["kid"], kid);
+        assert!(jwk["x"].as_str().is_some());
+    }
+
+    #[test]
+    fn encoding_decoding_keys_from_pem() {
+        let (priv_pem, pub_pem, _kid) = generate_ed25519_keypair().unwrap();
+        assert!(encoding_key_from_pem(&priv_pem).is_ok());
+        assert!(decoding_key_from_pem(&pub_pem).is_ok());
+    }
+}

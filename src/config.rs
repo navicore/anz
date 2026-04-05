@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Config {
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
@@ -124,5 +124,35 @@ impl Default for Config {
             login_rate_limit_window_secs: default_login_rate_limit_window_secs(),
             realms_dir: default_realms_dir(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_sensible() {
+        let c = Config::default();
+        assert_eq!(c.bind_address, "127.0.0.1:8080");
+        assert_eq!(c.access_token_lifetime_secs, 3600);
+        assert_eq!(c.auth_code_lifetime_secs, 300);
+        assert_eq!(c.session_lifetime_secs, 86400);
+        assert!(c.audit_log_enabled);
+        assert_eq!(c.login_rate_limit_max, 5);
+    }
+
+    #[test]
+    fn parse_partial_toml_fills_defaults() {
+        let toml_str = r#"bind_address = "0.0.0.0:9090""#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.bind_address, "0.0.0.0:9090");
+        assert_eq!(config.database_path, "anz.db");
+    }
+
+    #[test]
+    fn parse_empty_toml_uses_all_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config, Config::default());
     }
 }

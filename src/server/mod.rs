@@ -91,3 +91,58 @@ pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Rou
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::AuditLogger;
+
+    fn test_state() -> AppState {
+        let conn = crate::db::open_in_memory().unwrap();
+        let config = Config {
+            login_rate_limit_max: 3,
+            login_rate_limit_window_secs: 300,
+            ..Default::default()
+        };
+        AppState {
+            db: Arc::new(Mutex::new(conn)),
+            config: Arc::new(config),
+            audit: AuditLogger::new(false, "/dev/null"),
+            login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    #[test]
+    fn rate_limit_allows_under_max() {
+        let state = test_state();
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+
+        state.record_login_attempt(ip);
+        state.record_login_attempt(ip);
+        assert!(state.check_login_rate_limit(ip).is_ok());
+    }
+
+    #[test]
+    fn rate_limit_blocks_at_max() {
+        let state = test_state();
+        let ip: IpAddr = "10.0.0.2".parse().unwrap();
+
+        for _ in 0..3 {
+            state.record_login_attempt(ip);
+        }
+        assert!(state.check_login_rate_limit(ip).is_err());
+    }
+
+    #[test]
+    fn rate_limit_separate_per_ip() {
+        let state = test_state();
+        let ip_a: IpAddr = "10.0.0.3".parse().unwrap();
+        let ip_b: IpAddr = "10.0.0.4".parse().unwrap();
+
+        for _ in 0..3 {
+            state.record_login_attempt(ip_a);
+        }
+        assert!(state.check_login_rate_limit(ip_a).is_err());
+        assert!(state.check_login_rate_limit(ip_b).is_ok());
+    }
+}

@@ -86,3 +86,54 @@ pub struct LogEventParams<'a> {
     pub success: bool,
     pub detail: Option<&'a str>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_logger_does_not_panic() {
+        let logger = AuditLogger::new(false, "/dev/null");
+        logger.log_event(LogEventParams {
+            realm: "test",
+            action: AuditAction::LoginSuccess,
+            user_id: None,
+            client_id: None,
+            ip: None,
+            success: true,
+            detail: None,
+        });
+    }
+
+    #[test]
+    fn enabled_logger_writes_to_file() {
+        let dir = std::env::temp_dir().join(format!("anz_test_{}", uuid::Uuid::new_v4()));
+        let path = dir.join("audit.log");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let logger = AuditLogger::new(true, path.to_str().unwrap());
+        logger.log_event(LogEventParams {
+            realm: "myrealm",
+            action: AuditAction::LoginFailure,
+            user_id: Some("user1"),
+            client_id: None,
+            ip: Some("127.0.0.1".parse().unwrap()),
+            success: false,
+            detail: Some("bad password"),
+        });
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let event: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
+        assert_eq!(event["realm"], "myrealm");
+        assert_eq!(event["action"], "login_failure");
+        assert_eq!(event["success"], false);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn audit_action_serializes_to_snake_case() {
+        let json = serde_json::to_string(&AuditAction::TokenRevoked).unwrap();
+        assert_eq!(json, "\"token_revoked\"");
+    }
+}

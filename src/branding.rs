@@ -69,3 +69,49 @@ pub fn load_branding(realms_dir: &str, realm_name: &str) -> RealmBranding {
         Err(_) => RealmBranding::default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_sensible() {
+        let b = RealmBranding::default();
+        assert_eq!(b.title, "Sign In");
+        assert_eq!(b.primary_color, "#2563eb");
+        assert!(b.logo_path.is_none());
+        assert!(b.custom_css.is_none());
+    }
+
+    #[test]
+    fn logo_url_when_set() {
+        let b = RealmBranding {
+            logo_path: Some("logo.png".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            b.logo_url("myapp"),
+            Some("/realms/myapp/static/logo.png".to_string())
+        );
+    }
+
+    #[test]
+    fn logo_url_when_none() {
+        let b = RealmBranding::default();
+        assert_eq!(b.logo_url("myapp"), None);
+    }
+
+    #[test]
+    fn missing_dir_returns_defaults() {
+        let b = load_branding("/nonexistent/path", "norealm");
+        assert_eq!(b.title, "Sign In");
+    }
+
+    #[test]
+    fn parse_partial_toml() {
+        let toml_str = r#"title = "My Login""#;
+        let b: RealmBranding = toml::from_str(toml_str).unwrap();
+        assert_eq!(b.title, "My Login");
+        assert_eq!(b.primary_color, "#2563eb");
+    }
+}
