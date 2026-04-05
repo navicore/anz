@@ -13,3 +13,32 @@ pub fn generate_csrf_token() -> String {
 pub fn verify_csrf_token(token: &str, expected: &str) -> bool {
     token.as_bytes().ct_eq(expected.as_bytes()).into()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_token_is_nonempty() {
+        let token = generate_csrf_token();
+        assert!(!token.is_empty());
+    }
+
+    #[test]
+    fn two_tokens_differ() {
+        let a = generate_csrf_token();
+        let b = generate_csrf_token();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn verify_matching_tokens() {
+        let token = generate_csrf_token();
+        assert!(verify_csrf_token(&token, &token));
+    }
+
+    #[test]
+    fn verify_mismatched_tokens() {
+        assert!(!verify_csrf_token("aaa", "bbb"));
+    }
+}

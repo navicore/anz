@@ -142,3 +142,61 @@ pub fn update_password(conn: &Connection, user_id: &str, new_hash: &str) -> Resu
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+
+    fn setup() -> (rusqlite::Connection, String) {
+        let conn = db::open_in_memory().unwrap();
+        let realm = db::realm::create_realm(&conn, "test").unwrap();
+        (conn, realm.id)
+    }
+
+    #[test]
+    fn create_and_lookup_user() {
+        let (conn, realm_id) = setup();
+        let user = create_user(&conn, &realm_id, "alice", "a@b.com", "hash123").unwrap();
+        assert_eq!(user.username, "alice");
+
+        let found = get_user_by_username(&conn, &realm_id, "alice")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.id, user.id);
+        assert_eq!(found.email, "a@b.com");
+
+        let by_id = get_user_by_id(&conn, &user.id).unwrap().unwrap();
+        assert_eq!(by_id.username, "alice");
+    }
+
+    #[test]
+    fn list_and_delete_user() {
+        let (conn, realm_id) = setup();
+        create_user(&conn, &realm_id, "bob", "b@b.com", "h").unwrap();
+        create_user(&conn, &realm_id, "carol", "c@b.com", "h").unwrap();
+
+        let users = list_users(&conn, &realm_id).unwrap();
+        assert_eq!(users.len(), 2);
+
+        assert!(delete_user(&conn, &realm_id, "bob").unwrap());
+        assert_eq!(list_users(&conn, &realm_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn update_password_changes_hash() {
+        let (conn, realm_id) = setup();
+        let user = create_user(&conn, &realm_id, "dave", "d@b.com", "old_hash").unwrap();
+        update_password(&conn, &user.id, "new_hash").unwrap();
+
+        let updated = get_user_by_id(&conn, &user.id).unwrap().unwrap();
+        assert_eq!(updated.password_hash, "new_hash");
+    }
+
+    #[test]
+    fn duplicate_username_fails() {
+        let (conn, realm_id) = setup();
+        create_user(&conn, &realm_id, "alice", "a@b.com", "h").unwrap();
+        assert!(create_user(&conn, &realm_id, "alice", "a2@b.com", "h").is_err());
+    }
+}

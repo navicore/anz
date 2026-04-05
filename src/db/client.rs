@@ -131,3 +131,47 @@ pub fn delete_client(conn: &Connection, realm_id: &str, client_id: &str) -> Resu
     )?;
     Ok(rows > 0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+
+    fn setup() -> (rusqlite::Connection, String) {
+        let conn = db::open_in_memory().unwrap();
+        let realm = db::realm::create_realm(&conn, "test").unwrap();
+        (conn, realm.id)
+    }
+
+    #[test]
+    fn create_and_get_client() {
+        let (conn, realm_id) = setup();
+        let uris = vec!["http://localhost/cb".to_string()];
+        let client = create_client(&conn, &realm_id, "myapp", &uris).unwrap();
+        assert_eq!(client.client_id, "myapp");
+        assert_eq!(client.redirect_uris, uris);
+
+        let found = get_client_by_client_id(&conn, &realm_id, "myapp")
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.client_id, "myapp");
+    }
+
+    #[test]
+    fn list_and_delete_client() {
+        let (conn, realm_id) = setup();
+        create_client(&conn, &realm_id, "app1", &[]).unwrap();
+        create_client(&conn, &realm_id, "app2", &[]).unwrap();
+        assert_eq!(list_clients(&conn, &realm_id).unwrap().len(), 2);
+
+        assert!(delete_client(&conn, &realm_id, "app1").unwrap());
+        assert_eq!(list_clients(&conn, &realm_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn duplicate_client_id_fails() {
+        let (conn, realm_id) = setup();
+        create_client(&conn, &realm_id, "dup", &[]).unwrap();
+        assert!(create_client(&conn, &realm_id, "dup", &[]).is_err());
+    }
+}

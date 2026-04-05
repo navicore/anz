@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 use super::error::AppError;
 use super::AppState;
+use crate::audit::{AuditAction, LogEventParams};
 use crate::crypto::{keys, password as pw, token as jwt};
 use crate::db;
 
@@ -55,6 +56,16 @@ pub async fn change_password(
     let new_hash =
         pw::hash_password(&body.new_password).map_err(|e| AppError::Internal(e.to_string()))?;
     db::user::update_password(&conn, &user.id, &new_hash)?;
+
+    state.audit.log_event(LogEventParams {
+        realm: &realm,
+        action: AuditAction::PasswordChanged,
+        user_id: Some(&user.id),
+        client_id: None,
+        ip: None,
+        success: true,
+        detail: None,
+    });
 
     Ok(Json(json!({ "status": "password updated" })))
 }

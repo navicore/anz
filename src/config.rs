@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Config {
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
@@ -27,6 +27,21 @@ pub struct Config {
 
     #[serde(default = "default_session_lifetime")]
     pub session_lifetime_secs: u64,
+
+    #[serde(default = "default_audit_log_enabled")]
+    pub audit_log_enabled: bool,
+
+    #[serde(default = "default_audit_log_path")]
+    pub audit_log_path: String,
+
+    #[serde(default = "default_login_rate_limit_max")]
+    pub login_rate_limit_max: u32,
+
+    #[serde(default = "default_login_rate_limit_window_secs")]
+    pub login_rate_limit_window_secs: u64,
+
+    #[serde(default = "default_realms_dir")]
+    pub realms_dir: String,
 }
 
 fn default_bind_address() -> String {
@@ -52,6 +67,21 @@ fn default_auth_code_lifetime() -> u64 {
 }
 fn default_session_lifetime() -> u64 {
     86400
+}
+fn default_audit_log_enabled() -> bool {
+    true
+}
+fn default_audit_log_path() -> String {
+    "audit.log".to_string()
+}
+fn default_login_rate_limit_max() -> u32 {
+    5
+}
+fn default_login_rate_limit_window_secs() -> u64 {
+    300
+}
+fn default_realms_dir() -> String {
+    "realms".to_string()
 }
 
 impl Config {
@@ -88,6 +118,41 @@ impl Default for Config {
             refresh_token_lifetime_secs: default_refresh_token_lifetime(),
             auth_code_lifetime_secs: default_auth_code_lifetime(),
             session_lifetime_secs: default_session_lifetime(),
+            audit_log_enabled: default_audit_log_enabled(),
+            audit_log_path: default_audit_log_path(),
+            login_rate_limit_max: default_login_rate_limit_max(),
+            login_rate_limit_window_secs: default_login_rate_limit_window_secs(),
+            realms_dir: default_realms_dir(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_sensible() {
+        let c = Config::default();
+        assert_eq!(c.bind_address, "127.0.0.1:8080");
+        assert_eq!(c.access_token_lifetime_secs, 3600);
+        assert_eq!(c.auth_code_lifetime_secs, 300);
+        assert_eq!(c.session_lifetime_secs, 86400);
+        assert!(c.audit_log_enabled);
+        assert_eq!(c.login_rate_limit_max, 5);
+    }
+
+    #[test]
+    fn parse_partial_toml_fills_defaults() {
+        let toml_str = r#"bind_address = "0.0.0.0:9090""#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.bind_address, "0.0.0.0:9090");
+        assert_eq!(config.database_path, "anz.db");
+    }
+
+    #[test]
+    fn parse_empty_toml_uses_all_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config, Config::default());
     }
 }

@@ -1,4 +1,5 @@
 use askama::Template;
+use axum::extract::connect_info::ConnectInfo;
 use axum::extract::{Path, Query, State};
 use axum::http::header::SET_COOKIE;
 use axum::http::HeaderMap;
@@ -9,10 +10,13 @@ use chrono::{Duration, Utc};
 use rand::RngCore;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
 
 use super::error::AppError;
 use super::AppState;
-use crate::crypto::{csrf, password as pw};
+use crate::audit::{AuditAction, LogEventParams};
+use crate::branding;
+use crate::crypto::{self, csrf, password as pw};
 use crate::db;
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +45,11 @@ struct LoginTemplate {
     code_challenge: String,
     code_challenge_method: String,
     nonce: Option<String>,
+    branding_title: String,
+    branding_primary_color: String,
+    branding_background_color: String,
+    branding_logo_url: Option<String>,
+    branding_custom_css: Option<String>,
 }
 
 #[derive(Template)]
@@ -99,7 +108,8 @@ pub async fn authorize_get(
     if let Some(cookie_header) = headers.get(axum::http::header::COOKIE) {
         if let Ok(cookies) = cookie_header.to_str() {
             if let Some(session_token) = extract_cookie(cookies, &session_cookie_name) {
-                let token_hash = hex::encode(Sha256::digest(session_token.as_bytes()).as_slice());
+                let token_hash =
+                    crypto::hex_encode(Sha256::digest(session_token.as_bytes()).as_slice());
                 if let Ok(Some(session)) =
                     db::session::get_session_by_token_hash(&conn, &realm_obj.id, &token_hash)
                 {
@@ -121,8 +131,11 @@ pub async fn authorize_get(
     let csrf_cookie =
         format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
 
+    let realm_branding = branding::load_branding(&state.config.realms_dir, &realm);
+    let logo_url = realm_branding.logo_url(&realm);
+
     let tmpl = LoginTemplate {
-        realm_name: realm,
+        realm_name: realm.clone(),
         error_message: None,
         csrf_token,
         client_id: q.client_id,
@@ -133,6 +146,11 @@ pub async fn authorize_get(
         code_challenge: q.code_challenge.unwrap_or_default(),
         code_challenge_method: q.code_challenge_method.unwrap_or_default(),
         nonce: q.nonce,
+        branding_title: realm_branding.title,
+        branding_primary_color: realm_branding.primary_color,
+        branding_background_color: realm_branding.background_color,
+        branding_logo_url: logo_url,
+        branding_custom_css: realm_branding.custom_css,
     };
 
     let html = tmpl
@@ -160,9 +178,12 @@ pub struct AuthorizeForm {
 pub async fn authorize_post(
     State(state): State<AppState>,
     Path(realm): Path<String>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Form(form): Form<AuthorizeForm>,
 ) -> Result<Response, AppError> {
+    let ip = addr.ip();
+
     let conn = state
         .db
         .lock()
@@ -179,8 +200,28 @@ pub async fn authorize_post(
         .unwrap_or_default();
 
     if !csrf::verify_csrf_token(&form.csrf_token, &csrf_from_cookie) {
-        return render_login_error(&realm, &form, "Invalid request. Please try again.");
+        return render_login_error(&state, &realm, &form, "Invalid request. Please try again.");
     }
+
+    // Check rate limit after CSRF passes
+    if let Err(retry_after) = state.check_login_rate_limit(ip) {
+        let detail = format!("retry_after={retry_after}s");
+        state.audit.log_event(LogEventParams {
+            realm: &realm,
+            action: AuditAction::RateLimited,
+            user_id: None,
+            client_id: Some(&form.client_id),
+            ip: Some(ip),
+            success: false,
+            detail: Some(&detail),
+        });
+        return Err(AppError::TooManyRequests(format!(
+            "Too many login attempts. Retry after {retry_after} seconds."
+        )));
+    }
+
+    // Record the attempt
+    state.record_login_attempt(ip);
 
     // Validate client and redirect_uri
     let client = db::client::get_client_by_client_id(&conn, &realm_obj.id, &form.client_id)?
@@ -204,14 +245,35 @@ pub async fn authorize_post(
     };
 
     if !authenticated {
-        return render_login_error(&realm, &form, "Invalid username or password");
+        let detail = format!("username={}", form.username);
+        state.audit.log_event(LogEventParams {
+            realm: &realm,
+            action: AuditAction::LoginFailure,
+            user_id: user.as_ref().map(|u| u.id.as_str()),
+            client_id: Some(&form.client_id),
+            ip: Some(ip),
+            success: false,
+            detail: Some(&detail),
+        });
+        return render_login_error(&state, &realm, &form, "Invalid username or password");
     }
 
     let user = user.unwrap();
 
+    state.audit.log_event(LogEventParams {
+        realm: &realm,
+        action: AuditAction::LoginSuccess,
+        user_id: Some(&user.id),
+        client_id: Some(&form.client_id),
+        ip: Some(ip),
+        success: true,
+        detail: None,
+    });
+
     // Create session
     let session_token = generate_random_token();
-    let session_token_hash = hex::encode(Sha256::digest(session_token.as_bytes()).as_slice());
+    let session_token_hash =
+        crypto::hex_encode(Sha256::digest(session_token.as_bytes()).as_slice());
     let session_lifetime = Duration::seconds(state.config.session_lifetime_secs as i64);
     let session_expires = Utc::now() + session_lifetime;
     db::session::create_session(
@@ -221,6 +283,16 @@ pub async fn authorize_post(
         &session_token_hash,
         session_expires,
     )?;
+
+    state.audit.log_event(LogEventParams {
+        realm: &realm,
+        action: AuditAction::SessionCreated,
+        user_id: Some(&user.id),
+        client_id: Some(&form.client_id),
+        ip: Some(ip),
+        success: true,
+        detail: None,
+    });
 
     let session_cookie = format!(
         "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}",
@@ -272,7 +344,7 @@ fn generate_auth_code_redirect_inner(
     user_id: &str,
 ) -> Result<(Redirect, String), AppError> {
     let raw_code = generate_random_token();
-    let code_hash = hex::encode(Sha256::digest(raw_code.as_bytes()).as_slice());
+    let code_hash = crypto::hex_encode(Sha256::digest(raw_code.as_bytes()).as_slice());
 
     let lifetime = Duration::seconds(state.config.auth_code_lifetime_secs as i64);
     let expires_at = Utc::now() + lifetime;
@@ -304,6 +376,7 @@ fn generate_auth_code_redirect_inner(
 }
 
 fn render_login_error(
+    state: &AppState,
     realm: &str,
     form: &AuthorizeForm,
     error_msg: &str,
@@ -311,6 +384,9 @@ fn render_login_error(
     let csrf_token = csrf::generate_csrf_token();
     let csrf_cookie =
         format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
+
+    let realm_branding = branding::load_branding(&state.config.realms_dir, realm);
+    let logo_url = realm_branding.logo_url(realm);
 
     let tmpl = LoginTemplate {
         realm_name: realm.to_string(),
@@ -324,6 +400,11 @@ fn render_login_error(
         code_challenge: form.code_challenge.clone(),
         code_challenge_method: form.code_challenge_method.clone(),
         nonce: form.nonce.clone(),
+        branding_title: realm_branding.title,
+        branding_primary_color: realm_branding.primary_color,
+        branding_background_color: realm_branding.background_color,
+        branding_logo_url: logo_url,
+        branding_custom_css: realm_branding.custom_css,
     };
 
     let html = tmpl
@@ -346,11 +427,4 @@ fn extract_cookie(cookies: &str, name: &str) -> Option<String> {
         }
     }
     None
-}
-
-// hex encoding helper (avoid adding another dependency)
-mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
 }

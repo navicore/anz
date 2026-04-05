@@ -16,9 +16,12 @@ a reverse proxy and protect a handful of personal apps.
 - **OIDC authorization code flow** with PKCE
 - **Ed25519 signing** (per-realm keys)
 - **Argon2id** password hashing
-- **Refresh token rotation**
+- **Refresh token rotation** with RFC 7009 revocation
+- **Rate limiting** — per-IP login attempt throttling
+- **Audit logging** — JSON-line event log for login, token, and session activity
+- **Per-realm branding** — customizable login page (colors, logo, CSS)
 - **Minimal login UI** — server-rendered HTML, no JavaScript frameworks
-- **CLI admin** — no admin web UI, just `anz realm/user/client` commands
+- **CLI admin** — no admin web UI, just `anz realm/user/client/session` commands
 - **SQLite** — single file, embedded, no external database
 
 ## Quick Start
@@ -57,6 +60,7 @@ All endpoints are realm-scoped:
 | Token | `POST /realms/{realm}/token` |
 | UserInfo | `GET /realms/{realm}/userinfo` |
 | Password | `POST /realms/{realm}/password` |
+| Revoke | `POST /realms/{realm}/revoke` |
 
 ## CLI
 
@@ -70,6 +74,9 @@ anz user remove --realm <r> --username <u>
 anz client add --realm <r> --client-id <id> --redirect-uri <uri>
 anz client list --realm <r>
 anz client remove --realm <r> --client-id <id>
+anz session list --realm <r> --username <u>
+anz session revoke --realm <r> --username <u>
+anz session cleanup
 anz serve
 ```
 
@@ -81,14 +88,26 @@ docker run -v ./anz.toml:/etc/anz/anz.toml -v ./data:/data -p 8080:8080 \
   ghcr.io/navicore/anz --config /etc/anz/anz.toml serve
 ```
 
+## Releasing
+
+Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
+1. Runs CI checks
+2. Bumps `Cargo.toml` version to match the tag and commits to main
+3. Builds static binaries (Linux x86_64, macOS ARM64) and attaches them to the release
+4. Builds and pushes a Docker image to GHCR
+
+**Required repo secret:** `PAT` (GitHub token with `contents: write`).
+
 ## Development
 
 ```sh
-# run the same checks as CI
+# run the same checks as CI (format, clippy, tests, release build)
 just ci
 
 # format + build + test
 just dev
 ```
+
+CI runs `just ci` — the justfile is the single source of truth. Linux on PRs, macOS on merge to main.
 
 Requires [just](https://github.com/casey/just) and a Rust toolchain.

@@ -2,6 +2,9 @@
 name = "anz"
 version = "0.1.1"
 edition = "2021"
+description = "A minimal, personal OIDC provider for securing small web applications"
+license = "MIT"
+repository = "https://github.com/navicore/anz"
 
 [dependencies]
 axum = { version = "0.8", features = ["form", "query"] }
@@ -12,7 +15,7 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 argon2 = "0.5"
 password-hash = "0.5"
-jsonwebtoken = "10"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -30,3 +33,4 @@ url = "2"
 thiserror = "2"
 anyhow = "1"
 rpassword = "5"
+mime_guess = "2"

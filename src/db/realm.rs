@@ -74,3 +74,49 @@ pub fn delete_realm(conn: &Connection, name: &str) -> Result<bool> {
     let rows = conn.execute("DELETE FROM realms WHERE name = ?1", params![name])?;
     Ok(rows > 0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+
+    #[test]
+    fn create_and_get_realm() {
+        let conn = db::open_in_memory().unwrap();
+        let realm = create_realm(&conn, "testrealm").unwrap();
+        assert_eq!(realm.name, "testrealm");
+
+        let found = get_realm_by_name(&conn, "testrealm").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, realm.id);
+    }
+
+    #[test]
+    fn list_realms_returns_created() {
+        let conn = db::open_in_memory().unwrap();
+        create_realm(&conn, "alpha").unwrap();
+        create_realm(&conn, "beta").unwrap();
+
+        let realms = list_realms(&conn).unwrap();
+        assert_eq!(realms.len(), 2);
+        assert_eq!(realms[0].name, "alpha");
+        assert_eq!(realms[1].name, "beta");
+    }
+
+    #[test]
+    fn delete_realm_cascades() {
+        let conn = db::open_in_memory().unwrap();
+        let realm = create_realm(&conn, "doomed").unwrap();
+
+        db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash").unwrap();
+        assert!(delete_realm(&conn, "doomed").unwrap());
+        assert!(get_realm_by_name(&conn, "doomed").unwrap().is_none());
+        assert!(db::user::list_users(&conn, &realm.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_realm_returns_none() {
+        let conn = db::open_in_memory().unwrap();
+        assert!(get_realm_by_name(&conn, "nope").unwrap().is_none());
+    }
+}

@@ -1,6 +1,7 @@
 pub mod client;
 pub mod realm;
 pub mod serve;
+pub mod session;
 pub mod user;
 
 use clap::{Parser, Subcommand};
@@ -33,6 +34,11 @@ pub enum Commands {
     Client {
         #[command(subcommand)]
         action: client::ClientAction,
+    },
+    /// Manage sessions
+    Session {
+        #[command(subcommand)]
+        action: session::SessionAction,
     },
     /// Start the HTTP server
     Serve,

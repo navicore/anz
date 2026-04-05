@@ -70,3 +70,72 @@ pub fn consume_auth_code(conn: &Connection, code_hash: &str) -> Result<Option<Au
         None => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+    use chrono::Duration;
+
+    fn setup() -> (Connection, String, String) {
+        let conn = db::open_in_memory().unwrap();
+        let realm = db::realm::create_realm(&conn, "test").unwrap();
+        let user = db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash").unwrap();
+        (conn, realm.id, user.id)
+    }
+
+    #[test]
+    fn insert_and_consume_auth_code() {
+        let (conn, realm_id, user_id) = setup();
+        let code = NewAuthCode {
+            realm_id: &realm_id,
+            client_id: "myapp",
+            user_id: &user_id,
+            code_hash: "abc123",
+            redirect_uri: "http://localhost/cb",
+            scopes: "openid",
+            code_challenge: "challenge",
+            expires_at: Utc::now() + Duration::minutes(5),
+        };
+        insert_auth_code(&conn, &code).unwrap();
+
+        let consumed = consume_auth_code(&conn, "abc123").unwrap().unwrap();
+        assert_eq!(consumed.client_id, "myapp");
+        assert_eq!(consumed.user_id, user_id);
+    }
+
+    #[test]
+    fn consumed_code_cannot_be_reused() {
+        let (conn, realm_id, user_id) = setup();
+        let code = NewAuthCode {
+            realm_id: &realm_id,
+            client_id: "myapp",
+            user_id: &user_id,
+            code_hash: "once",
+            redirect_uri: "http://localhost/cb",
+            scopes: "openid",
+            code_challenge: "ch",
+            expires_at: Utc::now() + Duration::minutes(5),
+        };
+        insert_auth_code(&conn, &code).unwrap();
+        consume_auth_code(&conn, "once").unwrap().unwrap();
+        assert!(consume_auth_code(&conn, "once").unwrap().is_none());
+    }
+
+    #[test]
+    fn expired_code_returns_none() {
+        let (conn, realm_id, user_id) = setup();
+        let code = NewAuthCode {
+            realm_id: &realm_id,
+            client_id: "myapp",
+            user_id: &user_id,
+            code_hash: "expired",
+            redirect_uri: "http://localhost/cb",
+            scopes: "openid",
+            code_challenge: "ch",
+            expires_at: Utc::now() - Duration::minutes(1),
+        };
+        insert_auth_code(&conn, &code).unwrap();
+        assert!(consume_auth_code(&conn, "expired").unwrap().is_none());
+    }
+}

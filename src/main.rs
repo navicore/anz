@@ -1,3 +1,5 @@
+mod audit;
+mod branding;
 mod cli;
 mod config;
 mod crypto;
@@ -25,6 +27,7 @@ fn main() -> Result<()> {
         cli::Commands::Realm { action } => cli::realm::handle(action, &conn)?,
         cli::Commands::User { action } => cli::user::handle(action, &conn)?,
         cli::Commands::Client { action } => cli::client::handle(action, &conn)?,
+        cli::Commands::Session { action } => cli::session::handle(action, &conn)?,
         cli::Commands::Serve => cli::serve::run(config, conn)?,
     }
 

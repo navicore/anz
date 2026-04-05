@@ -1,18 +1,16 @@
-name: CI
+name: CI (macOS)
 
 # IMPORTANT: This workflow ONLY calls `just` commands.
 # The justfile is the source of truth for all build/test/lint logic.
-# This prevents drift between local development and CI.
+# Runs on merge to main — confirms the build works on macOS.
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
