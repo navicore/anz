@@ -65,3 +65,5 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 **Logging:** Structured logging via `tracing`. Level controlled by `RUST_LOG` env var. Audit events are separate — JSON lines written to a configurable log file.
 
 **Database access:** Synchronous rusqlite behind `Arc<Mutex<>>`. Foreign keys and WAL mode enabled at connection time. Schema migrations run on startup.
+
+**CI:** The `justfile` is the single source of truth for build operations. `just ci` runs formatting checks, clippy (warnings are errors), tests, and a release build. GitHub Actions calls `just ci` — Linux on PRs, macOS on push to main.

@@ -1,0 +1,36 @@
+name: CI (Linux)
+
+# IMPORTANT: This workflow ONLY calls `just` commands.
+# The justfile is the source of truth for all build/test/lint logic.
+# This prevents drift between local development and CI.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Run CI checks (just ci)
+        run: just ci

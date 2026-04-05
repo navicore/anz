@@ -81,14 +81,26 @@ docker run -v ./anz.toml:/etc/anz/anz.toml -v ./data:/data -p 8080:8080 \
   ghcr.io/navicore/anz --config /etc/anz/anz.toml serve
 ```
 
+## Releasing
+
+Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
+1. Runs CI checks
+2. Bumps `Cargo.toml` version to match the tag and commits to main
+3. Builds static binaries (Linux x86_64, macOS ARM64) and attaches them to the release
+4. Builds and pushes a Docker image to GHCR
+
+**Required repo secret:** `PAT` (GitHub token with `contents: write`).
+
 ## Development
 
 ```sh
-# run the same checks as CI
+# run the same checks as CI (format, clippy, tests, release build)
 just ci
 
 # format + build + test
 just dev
 ```
+
+CI runs `just ci` — the justfile is the single source of truth. Linux on PRs, macOS on merge to main.
 
 Requires [just](https://github.com/casey/just) and a Rust toolchain.

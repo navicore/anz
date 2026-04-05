@@ -16,7 +16,7 @@ build:
 # Run clippy on all targets (warnings are errors)
 lint:
     @echo "Running clippy..."
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # Check formatting without modifying files
 fmt-check:
@@ -31,18 +31,19 @@ fmt:
 # Run all tests
 test:
     @echo "Running tests..."
-    cargo test --all-targets
+    cargo test --workspace --all-targets
 
 # Run all CI checks (same as GitHub Actions!)
 # This is what developers should run before pushing
-ci: fmt-check lint test
+ci: fmt-check lint test build
     @echo ""
     @echo "All CI checks passed!"
     @echo "  - Code formatting"
     @echo "  - Clippy lints"
     @echo "  - Tests"
+    @echo "  - Release build"
     @echo ""
-    @echo "Safe to push."
+    @echo "Safe to push to GitHub - CI will pass."
 
 # Development: quick format + build + test
 dev: fmt build test
