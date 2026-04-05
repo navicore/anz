@@ -63,3 +63,12 @@ pub fn consume_refresh_token(conn: &Connection, token_hash: &str) -> Result<Opti
         None => Ok(None),
     }
 }
+
+/// Revoke a refresh token by its hash. Returns true if a token was revoked.
+pub fn revoke_refresh_token_by_hash(conn: &Connection, token_hash: &str) -> Result<bool> {
+    let count = conn.execute(
+        "UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = ?1 AND revoked = 0",
+        params![token_hash],
+    )?;
+    Ok(count > 0)
+}

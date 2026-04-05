@@ -58,3 +58,10 @@ pub struct SigningKeyRecord {
 pub struct Session {
     pub user_id: String,
 }
+
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    pub id: String,
+    pub created_at: String,
+    pub expires_at: String,
+}

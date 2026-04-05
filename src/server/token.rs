@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 
 use super::error::AppError;
 use super::AppState;
-use crate::crypto::{keys, pkce, token as jwt};
+use crate::audit::{AuditAction, LogEventParams};
+use crate::crypto::{self, keys, pkce, token as jwt};
 use crate::db;
 
 #[derive(Debug, Deserialize)]
@@ -64,7 +65,7 @@ fn handle_authorization_code(
         .ok_or_else(|| AppError::BadRequest("code_verifier is required (PKCE)".to_string()))?;
 
     // Hash the raw code and look it up
-    let code_hash = hex_encode(&Sha256::digest(raw_code.as_bytes()));
+    let code_hash = crypto::hex_encode(&Sha256::digest(raw_code.as_bytes()));
     let auth_code = db::auth_code::consume_auth_code(conn, &code_hash)?
         .ok_or_else(|| AppError::BadRequest("invalid or expired authorization code".to_string()))?;
 
@@ -117,7 +118,7 @@ fn handle_authorization_code(
 
     // Issue refresh token
     let raw_refresh = generate_random_token();
-    let refresh_hash = hex_encode(&Sha256::digest(raw_refresh.as_bytes()));
+    let refresh_hash = crypto::hex_encode(&Sha256::digest(raw_refresh.as_bytes()));
     let refresh_lifetime = Duration::seconds(state.config.refresh_token_lifetime_secs as i64);
     let refresh_expires = Utc::now() + refresh_lifetime;
     db::refresh_token::insert_refresh_token(
@@ -129,6 +130,16 @@ fn handle_authorization_code(
         &auth_code.scopes,
         refresh_expires,
     )?;
+
+    state.audit.log_event(LogEventParams {
+        realm,
+        action: AuditAction::TokenIssued,
+        user_id: Some(&user.id),
+        client_id: Some(&auth_code.client_id),
+        ip: None,
+        success: true,
+        detail: Some("grant=authorization_code"),
+    });
 
     Ok(Json(json!({
         "access_token": access_token,
@@ -151,7 +162,7 @@ fn handle_refresh_token(
         .as_deref()
         .ok_or_else(|| AppError::BadRequest("refresh_token is required".to_string()))?;
 
-    let token_hash = hex_encode(&Sha256::digest(raw_token.as_bytes()));
+    let token_hash = crypto::hex_encode(&Sha256::digest(raw_token.as_bytes()));
     let old_token = db::refresh_token::consume_refresh_token(conn, &token_hash)?
         .ok_or_else(|| AppError::BadRequest("invalid or expired refresh token".to_string()))?;
 
@@ -194,7 +205,7 @@ fn handle_refresh_token(
 
     // New refresh token (rotation)
     let new_raw_refresh = generate_random_token();
-    let new_refresh_hash = hex_encode(&Sha256::digest(new_raw_refresh.as_bytes()));
+    let new_refresh_hash = crypto::hex_encode(&Sha256::digest(new_raw_refresh.as_bytes()));
     let refresh_lifetime = Duration::seconds(state.config.refresh_token_lifetime_secs as i64);
     let refresh_expires = Utc::now() + refresh_lifetime;
     db::refresh_token::insert_refresh_token(
@@ -206,6 +217,16 @@ fn handle_refresh_token(
         &old_token.scopes,
         refresh_expires,
     )?;
+
+    state.audit.log_event(LogEventParams {
+        realm,
+        action: AuditAction::TokenRefreshed,
+        user_id: Some(&user.id),
+        client_id: Some(&old_token.client_id),
+        ip: None,
+        success: true,
+        detail: None,
+    });
 
     Ok(Json(json!({
         "access_token": access_token,
@@ -220,8 +241,4 @@ fn generate_random_token() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
