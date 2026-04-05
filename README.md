@@ -17,6 +17,8 @@ a reverse proxy and protect a handful of personal apps.
 - **Ed25519 signing** (per-realm keys)
 - **Argon2id** password hashing
 - **Refresh token rotation** with RFC 7009 revocation
+- **Confidential clients** — optional client_secret for server-side apps (Forgejo, etc.)
+- **Groups claim** — `groups` array in ID tokens and UserInfo for RBAC (Kubernetes, etc.)
 - **Rate limiting** — per-IP login attempt throttling
 - **Audit logging** — JSON-line event log for login, token, and session activity
 - **Per-realm branding** — customizable login page (colors, logo, CSS)
@@ -46,7 +48,7 @@ issuer_base_url = "https://auth.example.com"
 database_path = "anz.db"
 ```
 
-Deploy behind a TLS-terminating reverse proxy (nginx, caddy, etc.).
+Deploy behind a TLS-terminating reverse proxy (nginx, caddy, etc.). Set `issuer_base_url` to your public HTTPS URL — Kubernetes and other OIDC consumers require HTTPS and will reject tokens from HTTP issuers.
 
 ## OIDC Endpoints
 
@@ -68,10 +70,11 @@ All endpoints are realm-scoped:
 anz realm create <name>
 anz realm list
 anz realm delete <name>
-anz user add --realm <r> --username <u> --email <e>
+anz user add --realm <r> --username <u> --email <e> [--groups admin,dev]
+anz user update-groups --realm <r> --username <u> --groups <g1,g2>
 anz user list --realm <r>
 anz user remove --realm <r> --username <u>
-anz client add --realm <r> --client-id <id> --redirect-uri <uri>
+anz client add --realm <r> --client-id <id> --redirect-uri <uri> [--secret]
 anz client list --realm <r>
 anz client remove --realm <r> --client-id <id>
 anz session list --realm <r> --username <u>

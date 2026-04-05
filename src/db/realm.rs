@@ -108,7 +108,7 @@ mod tests {
         let conn = db::open_in_memory().unwrap();
         let realm = create_realm(&conn, "doomed").unwrap();
 
-        db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash").unwrap();
+        db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash", &[]).unwrap();
         assert!(delete_realm(&conn, "doomed").unwrap());
         assert!(get_realm_by_name(&conn, "doomed").unwrap().is_none());
         assert!(db::user::list_users(&conn, &realm.id).unwrap().is_empty());

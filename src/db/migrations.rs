@@ -73,5 +73,33 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
         ",
-    )
+    )?;
+
+    // Additive migrations for SSO support
+    // SQLite ignores ADD COLUMN if it already exists when using IF NOT EXISTS isn't available,
+    // so we check the schema first.
+    add_column_if_missing(conn, "clients", "client_secret_hash", "TEXT")?;
+    add_column_if_missing(conn, "users", "groups", "TEXT NOT NULL DEFAULT '[]'")?;
+
+    Ok(())
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_def: &str,
+) -> rusqlite::Result<()> {
+    let sql = format!("PRAGMA table_info({table})");
+    let mut stmt = conn.prepare(&sql)?;
+    let has_column = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|name| name.as_deref() == Ok(column));
+
+    if !has_column {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {column_def};"
+        ))?;
+    }
+    Ok(())
 }

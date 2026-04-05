@@ -21,6 +21,8 @@ pub struct TokenRequest {
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
 }
 
 pub async fn token(
@@ -34,6 +36,21 @@ pub async fn token(
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
+
+    // Validate client_secret if the client is confidential
+    if let Some(form_client_id) = &form.client_id {
+        if let Some(client) =
+            db::client::get_client_by_client_id(&conn, &realm_obj.id, form_client_id)?
+        {
+            if let Some(expected_hash) = &client.client_secret_hash {
+                let provided = form.client_secret.as_deref().unwrap_or("");
+                let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
+                if provided_hash != *expected_hash {
+                    return Err(AppError::Unauthorized("invalid client_secret".to_string()));
+                }
+            }
+        }
+    }
 
     match form.grant_type.as_str() {
         "authorization_code" => {
@@ -92,15 +109,16 @@ fn handle_authorization_code(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Build ID token
-    let id_claims = jwt::build_id_token_claims(
-        &issuer,
-        &user.id,
-        &auth_code.client_id,
-        state.config.id_token_lifetime_secs,
-        &user.username,
-        &user.email,
-        None, // nonce is not stored in auth_code in this implementation
-    );
+    let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
+        issuer: &issuer,
+        sub: &user.id,
+        aud: &auth_code.client_id,
+        lifetime_secs: state.config.id_token_lifetime_secs,
+        username: &user.username,
+        email: &user.email,
+        nonce: None,
+        groups: &user.groups,
+    });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -191,15 +209,16 @@ fn handle_refresh_token(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // New ID token
-    let id_claims = jwt::build_id_token_claims(
-        &issuer,
-        &user.id,
-        &old_token.client_id,
-        state.config.id_token_lifetime_secs,
-        &user.username,
-        &user.email,
-        None,
-    );
+    let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
+        issuer: &issuer,
+        sub: &user.id,
+        aud: &old_token.client_id,
+        lifetime_secs: state.config.id_token_lifetime_secs,
+        username: &user.username,
+        email: &user.email,
+        nonce: None,
+        groups: &user.groups,
+    });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
