@@ -1,7 +1,7 @@
 name: Release
 
-# IMPORTANT: This workflow ONLY calls `just` commands for build/test/lint.
-# The justfile is the source of truth - no duplicated cargo commands here.
+# This workflow calls `just ci` for checks and `cargo build` for binaries.
+# The justfile is the source of truth for lint/test/build logic.
 
 on:
   release:
@@ -21,8 +21,9 @@ jobs:
           token: ${{ secrets.PAT }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.93.0"
           components: rustfmt, clippy
 
       - name: Install Just
@@ -80,16 +81,17 @@ jobs:
         with:
           ref: main
 
-      - name: Install Rust (musl target)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.93.0"
           targets: x86_64-unknown-linux-musl
 
       - name: Install musl-tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build static binary
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --locked --release --target x86_64-unknown-linux-musl
 
       - name: Package binary
         run: |
@@ -110,10 +112,12 @@ jobs:
           ref: main
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
 
       - name: Build binary
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Package binary
         run: |

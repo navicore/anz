@@ -1,7 +1,11 @@
 # anz Build System
 #
 # This is the SOURCE OF TRUTH for all build/test/lint operations.
-# GitHub Actions calls these recipes directly - no duplication!
+# GitHub Actions calls `just ci` — nothing else.
+#
+# All cargo commands use --locked to ensure Cargo.lock is respected.
+# If Cargo.lock is out of date, the build fails instead of silently
+# resolving new dependency versions.
 
 # Default recipe: show available commands
 default:
@@ -10,13 +14,13 @@ default:
 # Build the release binary
 build:
     @echo "Building anz..."
-    cargo build --release
+    cargo build --locked --release
     @echo "Built: target/release/anz"
 
 # Run clippy on all targets (warnings are errors)
 lint:
     @echo "Running clippy..."
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --locked --workspace --all-targets -- -D warnings
 
 # Check formatting without modifying files
 fmt-check:
@@ -31,7 +35,7 @@ fmt:
 # Run all tests
 test:
     @echo "Running tests..."
-    cargo test --workspace --all-targets
+    cargo test --locked --workspace --all-targets
 
 # Run all CI checks (same as GitHub Actions!)
 # This is what developers should run before pushing
@@ -39,7 +43,7 @@ ci: fmt-check lint test build
     @echo ""
     @echo "All CI checks passed!"
     @echo "  - Code formatting"
-    @echo "  - Clippy lints"
+    @echo "  - Clippy lints (warnings are errors)"
     @echo "  - Tests"
     @echo "  - Release build"
     @echo ""

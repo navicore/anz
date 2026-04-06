@@ -1,8 +1,7 @@
 name: CI (macOS)
 
-# IMPORTANT: This workflow ONLY calls `just` commands.
+# This workflow ONLY calls `just ci`.
 # The justfile is the source of truth for all build/test/lint logic.
-# Runs on merge to main — confirms the build works on macOS.
 
 on:
   push:
@@ -16,8 +15,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.93.0"
           components: rustfmt, clippy
 
       - name: Install Just

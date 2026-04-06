@@ -108,8 +108,7 @@ pub async fn authorize_get(
     if let Some(cookie_header) = headers.get(axum::http::header::COOKIE) {
         if let Ok(cookies) = cookie_header.to_str() {
             if let Some(session_token) = extract_cookie(cookies, &session_cookie_name) {
-                let token_hash =
-                    crypto::hex_encode(Sha256::digest(session_token.as_bytes()).as_slice());
+                let token_hash = crypto::hex_encode(&Sha256::digest(session_token.as_bytes()));
                 if let Ok(Some(session)) =
                     db::session::get_session_by_token_hash(&conn, &realm_obj.id, &token_hash)
                 {
@@ -272,8 +271,7 @@ pub async fn authorize_post(
 
     // Create session
     let session_token = generate_random_token();
-    let session_token_hash =
-        crypto::hex_encode(Sha256::digest(session_token.as_bytes()).as_slice());
+    let session_token_hash = crypto::hex_encode(&Sha256::digest(session_token.as_bytes()));
     let session_lifetime = Duration::seconds(state.config.session_lifetime_secs as i64);
     let session_expires = Utc::now() + session_lifetime;
     db::session::create_session(
@@ -344,7 +342,7 @@ fn generate_auth_code_redirect_inner(
     user_id: &str,
 ) -> Result<(Redirect, String), AppError> {
     let raw_code = generate_random_token();
-    let code_hash = crypto::hex_encode(Sha256::digest(raw_code.as_bytes()).as_slice());
+    let code_hash = crypto::hex_encode(&Sha256::digest(raw_code.as_bytes()));
 
     let lifetime = Duration::seconds(state.config.auth_code_lifetime_secs as i64);
     let expires_at = Utc::now() + lifetime;
