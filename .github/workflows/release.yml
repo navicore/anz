@@ -1,6 +1,6 @@
 name: Release
 
-# This workflow calls `just ci` for checks and `cargo build` for binaries.
+# This workflow calls `just ci` for checks, then builds and pushes a Docker image.
 # The justfile is the source of truth for lint/test/build logic.
 
 on:
@@ -72,62 +72,6 @@ jobs:
           git add Cargo.toml Cargo.lock
           git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
           git push origin HEAD:main
-
-  binary-linux:
-    needs: version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93.0"
-          targets: x86_64-unknown-linux-musl
-
-      - name: Install musl-tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Build static binary
-        run: cargo build --locked --release --target x86_64-unknown-linux-musl
-
-      - name: Package binary
-        run: |
-          cd target/x86_64-unknown-linux-musl/release
-          tar czf ../../../anz-x86_64-linux.tar.gz anz
-
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: anz-x86_64-linux.tar.gz
-
-  binary-macos:
-    needs: version
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93.0"
-
-      - name: Build binary
-        run: cargo build --locked --release
-
-      - name: Package binary
-        run: |
-          cd target/release
-          tar czf ../../anz-aarch64-macos.tar.gz anz
-
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: anz-aarch64-macos.tar.gz
 
   docker:
     needs: version

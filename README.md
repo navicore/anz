@@ -98,8 +98,7 @@ docker run -v ./anz.toml:/etc/anz/anz.toml -v ./data:/data -p 8080:8080 \
 Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
 1. Runs CI checks
 2. Bumps `Cargo.toml` version to match the tag and commits to main
-3. Builds static binaries (Linux x86_64, macOS ARM64) and attaches them to the release
-4. Builds and pushes a Docker image to GHCR
+3. Builds and pushes a Docker image to GHCR
 
 **Required repo secret:** `PAT` (GitHub token with `contents: write`).
 
