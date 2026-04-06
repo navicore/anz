@@ -21,7 +21,6 @@ pub struct TokenRequest {
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
-    pub client_id: Option<String>,
     pub client_secret: Option<String>,
 }
 
@@ -36,21 +35,6 @@ pub async fn token(
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
-
-    // Validate client_secret if the client is confidential
-    if let Some(form_client_id) = &form.client_id {
-        if let Some(client) =
-            db::client::get_client_by_client_id(&conn, &realm_obj.id, form_client_id)?
-        {
-            if let Some(expected_hash) = &client.client_secret_hash {
-                let provided = form.client_secret.as_deref().unwrap_or("");
-                let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
-                if provided_hash != *expected_hash {
-                    return Err(AppError::Unauthorized("invalid client_secret".to_string()));
-                }
-            }
-        }
-    }
 
     match form.grant_type.as_str() {
         "authorization_code" => {
@@ -85,6 +69,14 @@ fn handle_authorization_code(
     let code_hash = crypto::hex_encode(&Sha256::digest(raw_code.as_bytes()));
     let auth_code = db::auth_code::consume_auth_code(conn, &code_hash)?
         .ok_or_else(|| AppError::BadRequest("invalid or expired authorization code".to_string()))?;
+
+    // Verify client_secret for confidential clients
+    verify_client_secret(
+        conn,
+        realm_id,
+        &auth_code.client_id,
+        form.client_secret.as_deref(),
+    )?;
 
     // Verify redirect_uri matches
     if auth_code.redirect_uri != redirect_uri {
@@ -184,6 +176,14 @@ fn handle_refresh_token(
     let old_token = db::refresh_token::consume_refresh_token(conn, &token_hash)?
         .ok_or_else(|| AppError::BadRequest("invalid or expired refresh token".to_string()))?;
 
+    // Verify client_secret for confidential clients
+    verify_client_secret(
+        conn,
+        realm_id,
+        &old_token.client_id,
+        form.client_secret.as_deref(),
+    )?;
+
     // Look up user
     let user = db::user::get_user_by_id(conn, &old_token.user_id)?
         .ok_or_else(|| AppError::Internal("user not found".to_string()))?;
@@ -254,6 +254,26 @@ fn handle_refresh_token(
         "id_token": id_token,
         "refresh_token": new_raw_refresh,
     })))
+}
+
+/// Validate client_secret for confidential clients. Public clients (no secret) pass through.
+fn verify_client_secret(
+    conn: &rusqlite::Connection,
+    realm_id: &str,
+    client_id: &str,
+    provided_secret: Option<&str>,
+) -> Result<(), AppError> {
+    let client = db::client::get_client_by_client_id(conn, realm_id, client_id)?;
+    if let Some(client) = client {
+        if let Some(expected_hash) = &client.client_secret_hash {
+            let provided = provided_secret.unwrap_or("");
+            let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
+            if provided_hash != *expected_hash {
+                return Err(AppError::Unauthorized("invalid client_secret".to_string()));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn generate_random_token() -> String {
