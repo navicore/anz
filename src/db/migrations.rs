@@ -73,5 +73,57 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
             created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
         ",
-    )
+    )?;
+
+    // Additive migrations for SSO support
+    // SQLite ignores ADD COLUMN if it already exists when using IF NOT EXISTS isn't available,
+    // so we check the schema first.
+    add_column_if_missing(conn, "clients", "client_secret_hash", "TEXT")?;
+    add_column_if_missing(conn, "users", "groups", "TEXT NOT NULL DEFAULT '[]'")?;
+
+    Ok(())
+}
+
+/// Check that a string is a safe SQL identifier (alphanumeric and underscores only).
+/// Table and column names cannot be parameterized in SQLite, so we must validate
+/// before interpolating into SQL strings.
+fn is_safe_identifier(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Add a column to a table if it doesn't already exist.
+///
+/// SAFETY: `table` and `column` are validated as safe identifiers. `column_def` is
+/// interpolated directly into SQL and MUST be a hardcoded string literal — never
+/// pass user-controlled or dynamic input as `column_def`.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_def: &str,
+) -> rusqlite::Result<()> {
+    if column_def.contains(';') || column_def.contains("--") {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "column_def contains unsafe SQL characters".to_string(),
+        ));
+    }
+    if !is_safe_identifier(table) || !is_safe_identifier(column) {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "unsafe identifier: table={table}, column={column}"
+        )));
+    }
+
+    let sql = format!("PRAGMA table_info({table})");
+    let mut stmt = conn.prepare(&sql)?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let has_column = columns.iter().any(|name| name == column);
+
+    if !has_column {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {column_def};"
+        ))?;
+    }
+    Ok(())
 }

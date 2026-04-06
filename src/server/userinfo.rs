@@ -35,11 +35,17 @@ pub async fn userinfo(
     let user = db::user::get_user_by_id(&conn, &claims.sub)?
         .ok_or_else(|| AppError::Internal("user not found".to_string()))?;
 
-    Ok(Json(json!({
+    let mut response = json!({
         "sub": user.id,
         "preferred_username": user.username,
         "email": user.email,
-    })))
+    });
+    let has_groups_scope = claims.scope.split_whitespace().any(|s| s == "groups");
+    if has_groups_scope && !user.groups.is_empty() {
+        response["groups"] = json!(user.groups);
+    }
+
+    Ok(Json(response))
 }
 
 fn extract_bearer(headers: &HeaderMap) -> Result<String, AppError> {

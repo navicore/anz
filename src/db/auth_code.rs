@@ -80,7 +80,8 @@ mod tests {
     fn setup() -> (Connection, String, String) {
         let conn = db::open_in_memory().unwrap();
         let realm = db::realm::create_realm(&conn, "test").unwrap();
-        let user = db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash").unwrap();
+        let user =
+            db::user::create_user(&conn, &realm.id, "alice", "a@b.com", "hash", &[]).unwrap();
         (conn, realm.id, user.id)
     }
 

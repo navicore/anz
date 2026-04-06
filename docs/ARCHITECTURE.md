@@ -43,8 +43,8 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 
 **Realm** is the aggregate root for tenant isolation. Each realm owns its own set of users, clients, signing keys, authorization codes, refresh tokens, and sessions. Deleting a realm cascades to all its data.
 
-- **User** — username + email + Argon2id password hash, unique per realm
-- **Client** — client_id + redirect_uris (JSON) + allowed_scopes, unique per realm
+- **User** — username + email + Argon2id password hash + groups (JSON array), unique per realm
+- **Client** — client_id + redirect_uris (JSON) + allowed_scopes + optional client_secret_hash (SHA-256), unique per realm. Clients with a secret are confidential; those without are public (PKCE-only).
 - **SigningKey** — Ed25519 key pair (PEM-encoded), one active per realm, kid in JWT headers
 - **AuthorizationCode** — single-use, 5-min TTL, stores PKCE code_challenge, stored as SHA-256 hash
 - **RefreshToken** — 30-day TTL, supports rotation (revoked on use), stored as SHA-256 hash
@@ -58,7 +58,7 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 
 **Error handling:** `AppError` enum maps domain errors to HTTP status codes (400, 401, 404, 429, 500). Uses `thiserror` for the enum and `anyhow` for internal propagation. JSON `{"error": "..."}` responses.
 
-**Token/code storage:** Authorization codes and refresh tokens are never stored in plaintext. The database holds SHA-256 hashes; lookup is by hash.
+**Token/code storage:** Authorization codes, refresh tokens, and client secrets are never stored in plaintext. The database holds SHA-256 hashes; lookup is by hash.
 
 **Rate limiting:** Login attempts are tracked per IP address in memory. Default: 5 attempts per 5-minute window, returning 429 when exceeded.
 

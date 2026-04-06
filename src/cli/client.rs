@@ -1,7 +1,11 @@
 use anyhow::{bail, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use clap::Subcommand;
+use rand::RngCore;
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 
+use crate::crypto;
 use crate::db;
 
 #[derive(Subcommand)]
@@ -17,6 +21,9 @@ pub enum ClientAction {
         /// Redirect URI (can be specified multiple times)
         #[arg(long)]
         redirect_uri: Vec<String>,
+        /// Generate a client secret (for confidential clients like Forgejo)
+        #[arg(long)]
+        secret: bool,
     },
     /// List clients in a realm
     List {
@@ -41,6 +48,7 @@ pub fn handle(action: ClientAction, conn: &Connection) -> Result<()> {
             realm,
             client_id,
             redirect_uri,
+            secret,
         } => {
             let realm_obj = db::realm::get_realm_by_name(conn, &realm)?;
             let realm_obj = match realm_obj {
@@ -48,13 +56,33 @@ pub fn handle(action: ClientAction, conn: &Connection) -> Result<()> {
                 None => bail!("Realm '{realm}' not found"),
             };
 
-            let client = db::client::create_client(conn, &realm_obj.id, &client_id, &redirect_uri)?;
+            let (raw_secret, secret_hash) = if secret {
+                let mut bytes = [0u8; 32];
+                rand::thread_rng().fill_bytes(&mut bytes);
+                let raw = URL_SAFE_NO_PAD.encode(bytes);
+                let hash = crypto::hex_encode(&Sha256::digest(raw.as_bytes()));
+                (Some(raw), Some(hash))
+            } else {
+                (None, None)
+            };
+
+            let client = db::client::create_client(
+                conn,
+                &realm_obj.id,
+                &client_id,
+                &redirect_uri,
+                secret_hash.as_deref(),
+            )?;
             println!(
                 "Created client '{}' in realm '{}' (id: {})",
                 client.client_id, realm, client.id
             );
             for uri in &client.redirect_uris {
                 println!("  redirect_uri: {uri}");
+            }
+            if let Some(raw) = raw_secret {
+                println!("  client_secret: {raw}");
+                println!("  (save this — it cannot be retrieved again)");
             }
         }
         ClientAction::List { realm } => {

@@ -15,6 +15,7 @@ pub struct User {
     pub username: String,
     pub email: String,
     pub password_hash: String,
+    pub groups: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -26,6 +27,7 @@ pub struct Client {
     pub client_id: String,
     pub redirect_uris: Vec<String>,
     pub allowed_scopes: Vec<String>,
+    pub client_secret_hash: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

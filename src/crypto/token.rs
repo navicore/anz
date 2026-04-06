@@ -13,6 +13,8 @@ pub struct IdTokenClaims {
     pub nonce: Option<String>,
     pub preferred_username: String,
     pub email: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,25 +50,36 @@ pub fn decode_access_token(
     Ok(data.claims)
 }
 
-pub fn build_id_token_claims(
-    issuer: &str,
-    sub: &str,
-    aud: &str,
-    lifetime_secs: u64,
-    username: &str,
-    email: &str,
-    nonce: Option<String>,
-) -> IdTokenClaims {
+pub struct IdTokenParams<'a> {
+    pub issuer: &'a str,
+    pub sub: &'a str,
+    pub aud: &'a str,
+    pub lifetime_secs: u64,
+    pub username: &'a str,
+    pub email: &'a str,
+    pub nonce: Option<String>,
+    pub groups: &'a [String],
+    /// Space-separated scope string. Groups are only included when "groups" is in scope.
+    pub scopes: &'a str,
+}
+
+pub fn build_id_token_claims(p: &IdTokenParams) -> IdTokenClaims {
     let now = Utc::now().timestamp();
+    let has_groups_scope = p.scopes.split_whitespace().any(|s| s == "groups");
     IdTokenClaims {
-        iss: issuer.to_string(),
-        sub: sub.to_string(),
-        aud: aud.to_string(),
-        exp: now + lifetime_secs as i64,
+        iss: p.issuer.to_string(),
+        sub: p.sub.to_string(),
+        aud: p.aud.to_string(),
+        exp: now + p.lifetime_secs as i64,
         iat: now,
-        nonce,
-        preferred_username: username.to_string(),
-        email: email.to_string(),
+        nonce: p.nonce.clone(),
+        preferred_username: p.username.to_string(),
+        email: p.email.to_string(),
+        groups: if has_groups_scope {
+            p.groups.to_vec()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -120,20 +133,41 @@ mod tests {
     }
 
     #[test]
-    fn id_token_claims_have_correct_fields() {
-        let claims = build_id_token_claims(
-            "https://iss",
-            "sub1",
-            "aud1",
-            3600,
-            "alice",
-            "alice@example.com",
-            Some("nonce123".to_string()),
-        );
+    fn id_token_claims_include_groups_when_scoped() {
+        let groups = vec!["admin".to_string(), "dev".to_string()];
+        let claims = build_id_token_claims(&IdTokenParams {
+            issuer: "https://iss",
+            sub: "sub1",
+            aud: "aud1",
+            lifetime_secs: 3600,
+            username: "alice",
+            email: "alice@example.com",
+            nonce: Some("nonce123".to_string()),
+            groups: &groups,
+            scopes: "openid groups",
+        });
         assert_eq!(claims.preferred_username, "alice");
         assert_eq!(claims.email, "alice@example.com");
         assert_eq!(claims.nonce, Some("nonce123".to_string()));
+        assert_eq!(claims.groups, vec!["admin", "dev"]);
         assert!(claims.exp > claims.iat);
+    }
+
+    #[test]
+    fn id_token_claims_omit_groups_without_scope() {
+        let groups = vec!["admin".to_string()];
+        let claims = build_id_token_claims(&IdTokenParams {
+            issuer: "https://iss",
+            sub: "sub1",
+            aud: "aud1",
+            lifetime_secs: 3600,
+            username: "alice",
+            email: "alice@example.com",
+            nonce: None,
+            groups: &groups,
+            scopes: "openid profile email",
+        });
+        assert!(claims.groups.is_empty());
     }
 
     #[test]

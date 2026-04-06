@@ -7,6 +7,7 @@ use rand::RngCore;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use super::error::AppError;
 use super::AppState;
@@ -21,6 +22,7 @@ pub struct TokenRequest {
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
     pub refresh_token: Option<String>,
+    pub client_secret: Option<String>,
 }
 
 pub async fn token(
@@ -69,6 +71,14 @@ fn handle_authorization_code(
     let auth_code = db::auth_code::consume_auth_code(conn, &code_hash)?
         .ok_or_else(|| AppError::BadRequest("invalid or expired authorization code".to_string()))?;
 
+    // Verify client_secret for confidential clients
+    verify_client_secret(
+        conn,
+        realm_id,
+        &auth_code.client_id,
+        form.client_secret.as_deref(),
+    )?;
+
     // Verify redirect_uri matches
     if auth_code.redirect_uri != redirect_uri {
         return Err(AppError::BadRequest("redirect_uri mismatch".to_string()));
@@ -91,16 +101,18 @@ fn handle_authorization_code(
     let encoding_key = keys::encoding_key_from_pem(&signing_key.private_key_pem)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // Build ID token
-    let id_claims = jwt::build_id_token_claims(
-        &issuer,
-        &user.id,
-        &auth_code.client_id,
-        state.config.id_token_lifetime_secs,
-        &user.username,
-        &user.email,
-        None, // nonce is not stored in auth_code in this implementation
-    );
+    // Build ID token (groups only included when "groups" scope is requested)
+    let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
+        issuer: &issuer,
+        sub: &user.id,
+        aud: &auth_code.client_id,
+        lifetime_secs: state.config.id_token_lifetime_secs,
+        username: &user.username,
+        email: &user.email,
+        nonce: None,
+        groups: &user.groups,
+        scopes: &auth_code.scopes,
+    });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -166,6 +178,14 @@ fn handle_refresh_token(
     let old_token = db::refresh_token::consume_refresh_token(conn, &token_hash)?
         .ok_or_else(|| AppError::BadRequest("invalid or expired refresh token".to_string()))?;
 
+    // Verify client_secret for confidential clients
+    verify_client_secret(
+        conn,
+        realm_id,
+        &old_token.client_id,
+        form.client_secret.as_deref(),
+    )?;
+
     // Look up user
     let user = db::user::get_user_by_id(conn, &old_token.user_id)?
         .ok_or_else(|| AppError::Internal("user not found".to_string()))?;
@@ -191,15 +211,17 @@ fn handle_refresh_token(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // New ID token
-    let id_claims = jwt::build_id_token_claims(
-        &issuer,
-        &user.id,
-        &old_token.client_id,
-        state.config.id_token_lifetime_secs,
-        &user.username,
-        &user.email,
-        None,
-    );
+    let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
+        issuer: &issuer,
+        sub: &user.id,
+        aud: &old_token.client_id,
+        lifetime_secs: state.config.id_token_lifetime_secs,
+        username: &user.username,
+        email: &user.email,
+        nonce: None,
+        groups: &user.groups,
+        scopes: &old_token.scopes,
+    });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -237,8 +259,144 @@ fn handle_refresh_token(
     })))
 }
 
+/// Validate client_secret for confidential clients. Public clients (no secret) pass through.
+fn verify_client_secret(
+    conn: &rusqlite::Connection,
+    realm_id: &str,
+    client_id: &str,
+    provided_secret: Option<&str>,
+) -> Result<(), AppError> {
+    let client = db::client::get_client_by_client_id(conn, realm_id, client_id)?
+        .ok_or_else(|| AppError::Unauthorized("invalid client credentials".to_string()))?;
+
+    if let Some(expected_hash) = &client.client_secret_hash {
+        let provided = provided_secret.unwrap_or("");
+        let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
+        let matches: bool = provided_hash
+            .as_bytes()
+            .ct_eq(expected_hash.as_bytes())
+            .into();
+        if !matches {
+            return Err(AppError::Unauthorized(
+                "invalid client credentials".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn generate_random_token() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    fn setup() -> (rusqlite::Connection, String) {
+        let conn = crate::db::open_in_memory().unwrap();
+        let realm = crate::db::realm::create_realm(&conn, "test").unwrap();
+        (conn, realm.id)
+    }
+
+    #[test]
+    fn public_client_passes_without_secret() {
+        let (conn, realm_id) = setup();
+        db::client::create_client(&conn, &realm_id, "public-app", &[], None).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "public-app", None).is_ok());
+    }
+
+    #[test]
+    fn confidential_client_passes_with_correct_secret() {
+        let (conn, realm_id) = setup();
+        let secret = "my-secret-value";
+        let hash = crypto::hex_encode(&Sha256::digest(secret.as_bytes()));
+        db::client::create_client(&conn, &realm_id, "secure-app", &[], Some(&hash)).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "secure-app", Some(secret)).is_ok());
+    }
+
+    #[test]
+    fn confidential_client_rejects_wrong_secret() {
+        let (conn, realm_id) = setup();
+        let hash = crypto::hex_encode(&Sha256::digest(b"correct"));
+        db::client::create_client(&conn, &realm_id, "secure-app", &[], Some(&hash)).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "secure-app", Some("wrong")).is_err());
+    }
+
+    #[test]
+    fn confidential_client_rejects_missing_secret() {
+        let (conn, realm_id) = setup();
+        let hash = crypto::hex_encode(&Sha256::digest(b"secret"));
+        db::client::create_client(&conn, &realm_id, "secure-app", &[], Some(&hash)).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "secure-app", None).is_err());
+    }
+
+    #[test]
+    fn missing_client_is_rejected() {
+        let (conn, realm_id) = setup();
+        assert!(verify_client_secret(&conn, &realm_id, "nonexistent", Some("any")).is_err());
+    }
+
+    // -- HTTP-level integration tests --
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn build_test_router() -> axum::Router {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::realm::create_realm(&conn, "test").unwrap();
+        let audit = crate::audit::AuditLogger::new(false, "/dev/null");
+        let config = crate::config::Config::default();
+        crate::server::build_router(config, conn, audit)
+    }
+
+    fn token_form_request(realm: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/realms/{realm}/token"))
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn http_token_rejects_wrong_secret() {
+        let router = build_test_router();
+
+        let resp = router
+            .oneshot(token_form_request(
+                "test",
+                "grant_type=authorization_code&code=bogus&redirect_uri=http://x&code_verifier=x",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn http_token_returns_400_for_unknown_grant() {
+        let router = build_test_router();
+        let resp = router
+            .oneshot(token_form_request("test", "grant_type=invalid"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn http_token_returns_404_for_unknown_realm() {
+        let router = build_test_router();
+        let resp = router
+            .oneshot(token_form_request(
+                "nonexistent",
+                "grant_type=authorization_code&code=x&redirect_uri=x&code_verifier=x",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }
