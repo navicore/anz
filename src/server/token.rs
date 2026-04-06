@@ -28,8 +28,16 @@ pub struct TokenRequest {
 pub async fn token(
     State(state): State<AppState>,
     Path(realm): Path<String>,
+    headers: axum::http::HeaderMap,
     Form(form): Form<TokenRequest>,
 ) -> Result<Json<Value>, AppError> {
+    // Extract client_secret from form body (client_secret_post) or
+    // Authorization Basic header (client_secret_basic)
+    let client_secret = form
+        .client_secret
+        .clone()
+        .or_else(|| extract_basic_auth_secret(&headers));
+
     let conn = state
         .db
         .lock()
@@ -38,10 +46,22 @@ pub async fn token(
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
     match form.grant_type.as_str() {
-        "authorization_code" => {
-            handle_authorization_code(&conn, &state, &realm, &realm_obj.id, &form)
-        }
-        "refresh_token" => handle_refresh_token(&conn, &state, &realm, &realm_obj.id, &form),
+        "authorization_code" => handle_authorization_code(
+            &conn,
+            &state,
+            &realm,
+            &realm_obj.id,
+            &form,
+            client_secret.as_deref(),
+        ),
+        "refresh_token" => handle_refresh_token(
+            &conn,
+            &state,
+            &realm,
+            &realm_obj.id,
+            &form,
+            client_secret.as_deref(),
+        ),
         _ => Err(AppError::BadRequest("unsupported grant_type".to_string())),
     }
 }
@@ -52,6 +72,7 @@ fn handle_authorization_code(
     realm: &str,
     realm_id: &str,
     form: &TokenRequest,
+    client_secret: Option<&str>,
 ) -> Result<Json<Value>, AppError> {
     let raw_code = form
         .code
@@ -72,12 +93,7 @@ fn handle_authorization_code(
         .ok_or_else(|| AppError::BadRequest("invalid or expired authorization code".to_string()))?;
 
     // Verify client_secret for confidential clients
-    verify_client_secret(
-        conn,
-        realm_id,
-        &auth_code.client_id,
-        form.client_secret.as_deref(),
-    )?;
+    verify_client_secret(conn, realm_id, &auth_code.client_id, client_secret)?;
 
     // Verify redirect_uri matches
     if auth_code.redirect_uri != redirect_uri {
@@ -168,6 +184,7 @@ fn handle_refresh_token(
     realm: &str,
     realm_id: &str,
     form: &TokenRequest,
+    client_secret: Option<&str>,
 ) -> Result<Json<Value>, AppError> {
     let raw_token = form
         .refresh_token
@@ -179,12 +196,7 @@ fn handle_refresh_token(
         .ok_or_else(|| AppError::BadRequest("invalid or expired refresh token".to_string()))?;
 
     // Verify client_secret for confidential clients
-    verify_client_secret(
-        conn,
-        realm_id,
-        &old_token.client_id,
-        form.client_secret.as_deref(),
-    )?;
+    verify_client_secret(conn, realm_id, &old_token.client_id, client_secret)?;
 
     // Look up user
     let user = db::user::get_user_by_id(conn, &old_token.user_id)?
@@ -257,6 +269,24 @@ fn handle_refresh_token(
         "id_token": id_token,
         "refresh_token": new_raw_refresh,
     })))
+}
+
+/// Extract client_secret from an HTTP Basic Authorization header.
+/// Format: `Authorization: Basic base64(client_id:client_secret)`
+fn extract_basic_auth_secret(headers: &axum::http::HeaderMap) -> Option<String> {
+    let auth = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    let encoded = auth.strip_prefix("Basic ")?;
+    let decoded = String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .ok()?,
+    )
+    .ok()?;
+    let (_client_id, secret) = decoded.split_once(':')?;
+    Some(secret.to_string())
 }
 
 /// Validate client_secret for confidential clients. Public clients (no secret) pass through.

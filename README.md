@@ -50,7 +50,7 @@ database_path = "anz.db"
 
 Deploy behind a TLS-terminating reverse proxy (nginx, caddy, etc.). Set `issuer_base_url` to your public HTTPS URL — Kubernetes and other OIDC consumers require HTTPS and will reject tokens from HTTP issuers.
 
-Confidential clients authenticate via `client_secret_post` (secret in the POST body). `client_secret_basic` (HTTP Basic auth header) is not supported — configure clients like Forgejo to use `client_secret_post`.
+Confidential clients authenticate via `client_secret_post` (secret in the POST body) or `client_secret_basic` (HTTP Basic auth header).
 
 ## OIDC Endpoints
 

@@ -30,7 +30,7 @@ pub async fn openid_configuration(
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["EdDSA"],
         "scopes_supported": ["openid", "profile", "email", "groups"],
-        "token_endpoint_auth_methods_supported": ["none", "client_secret_post"],
+        "token_endpoint_auth_methods_supported": ["none", "client_secret_post", "client_secret_basic"],
         "claims_supported": ["sub", "iss", "aud", "exp", "iat", "preferred_username", "email", "groups"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
