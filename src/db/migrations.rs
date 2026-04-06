@@ -102,10 +102,11 @@ fn add_column_if_missing(
     column: &str,
     column_def: &str,
 ) -> rusqlite::Result<()> {
-    debug_assert!(
-        !column_def.contains(';') && !column_def.contains("--"),
-        "column_def must be a simple type definition, not arbitrary SQL"
-    );
+    if column_def.contains(';') || column_def.contains("--") {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "column_def contains unsafe SQL characters".to_string(),
+        ));
+    }
     if !is_safe_identifier(table) || !is_safe_identifier(column) {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "unsafe identifier: table={table}, column={column}"
