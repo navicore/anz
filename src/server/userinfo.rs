@@ -40,7 +40,8 @@ pub async fn userinfo(
         "preferred_username": user.username,
         "email": user.email,
     });
-    if !user.groups.is_empty() {
+    let has_groups_scope = claims.scope.split_whitespace().any(|s| s == "groups");
+    if has_groups_scope && !user.groups.is_empty() {
         response["groups"] = json!(user.groups);
     }
 

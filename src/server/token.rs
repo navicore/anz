@@ -7,6 +7,7 @@ use rand::RngCore;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use super::error::AppError;
 use super::AppState;
@@ -100,7 +101,7 @@ fn handle_authorization_code(
     let encoding_key = keys::encoding_key_from_pem(&signing_key.private_key_pem)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // Build ID token
+    // Build ID token (groups only included when "groups" scope is requested)
     let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
         issuer: &issuer,
         sub: &user.id,
@@ -110,6 +111,7 @@ fn handle_authorization_code(
         email: &user.email,
         nonce: None,
         groups: &user.groups,
+        scopes: &auth_code.scopes,
     });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -218,6 +220,7 @@ fn handle_refresh_token(
         email: &user.email,
         nonce: None,
         groups: &user.groups,
+        scopes: &old_token.scopes,
     });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -264,13 +267,19 @@ fn verify_client_secret(
     provided_secret: Option<&str>,
 ) -> Result<(), AppError> {
     let client = db::client::get_client_by_client_id(conn, realm_id, client_id)?
-        .ok_or_else(|| AppError::Unauthorized(format!("client '{client_id}' not found")))?;
+        .ok_or_else(|| AppError::Unauthorized("invalid client credentials".to_string()))?;
 
     if let Some(expected_hash) = &client.client_secret_hash {
         let provided = provided_secret.unwrap_or("");
         let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
-        if provided_hash != *expected_hash {
-            return Err(AppError::Unauthorized("invalid client_secret".to_string()));
+        let matches: bool = provided_hash
+            .as_bytes()
+            .ct_eq(expected_hash.as_bytes())
+            .into();
+        if !matches {
+            return Err(AppError::Unauthorized(
+                "invalid client credentials".to_string(),
+            ));
         }
     }
     Ok(())
@@ -329,5 +338,66 @@ mod tests {
     fn missing_client_is_rejected() {
         let (conn, realm_id) = setup();
         assert!(verify_client_secret(&conn, &realm_id, "nonexistent", Some("any")).is_err());
+    }
+
+    // -- HTTP-level integration tests --
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn build_test_router() -> (axum::Router, String) {
+        let conn = crate::db::open_in_memory().unwrap();
+        let realm = crate::db::realm::create_realm(&conn, "test").unwrap();
+        let audit = crate::audit::AuditLogger::new(false, "/dev/null");
+        let config = crate::config::Config::default();
+        let router = crate::server::build_router(config, conn, audit);
+        (router, realm.id)
+    }
+
+    fn token_form_request(realm: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(format!("/realms/{realm}/token"))
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn http_token_rejects_wrong_secret() {
+        let (router, _) = build_test_router();
+
+        let resp = router
+            .oneshot(token_form_request(
+                "test",
+                "grant_type=authorization_code&code=bogus&redirect_uri=http://x&code_verifier=x",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn http_token_returns_400_for_unknown_grant() {
+        let (router, _) = build_test_router();
+        let resp = router
+            .oneshot(token_form_request("test", "grant_type=invalid"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn http_token_returns_404_for_unknown_realm() {
+        let (router, _) = build_test_router();
+        let resp = router
+            .oneshot(token_form_request(
+                "nonexistent",
+                "grant_type=authorization_code&code=x&redirect_uri=x&code_verifier=x",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }

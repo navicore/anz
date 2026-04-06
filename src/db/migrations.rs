@@ -91,12 +91,21 @@ fn is_safe_identifier(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Add a column to a table if it doesn't already exist.
+///
+/// SAFETY: `table` and `column` are validated as safe identifiers. `column_def` is
+/// interpolated directly into SQL and MUST be a hardcoded string literal — never
+/// pass user-controlled or dynamic input as `column_def`.
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
     column: &str,
     column_def: &str,
 ) -> rusqlite::Result<()> {
+    debug_assert!(
+        !column_def.contains(';') && !column_def.contains("--"),
+        "column_def must be a simple type definition, not arbitrary SQL"
+    );
     if !is_safe_identifier(table) || !is_safe_identifier(column) {
         return Err(rusqlite::Error::InvalidParameterName(format!(
             "unsafe identifier: table={table}, column={column}"
