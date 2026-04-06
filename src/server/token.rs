@@ -346,13 +346,12 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
-    fn build_test_router() -> (axum::Router, String) {
+    fn build_test_router() -> axum::Router {
         let conn = crate::db::open_in_memory().unwrap();
-        let realm = crate::db::realm::create_realm(&conn, "test").unwrap();
+        crate::db::realm::create_realm(&conn, "test").unwrap();
         let audit = crate::audit::AuditLogger::new(false, "/dev/null");
         let config = crate::config::Config::default();
-        let router = crate::server::build_router(config, conn, audit);
-        (router, realm.id)
+        crate::server::build_router(config, conn, audit)
     }
 
     fn token_form_request(realm: &str, body: &str) -> Request<Body> {
@@ -366,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_token_rejects_wrong_secret() {
-        let (router, _) = build_test_router();
+        let router = build_test_router();
 
         let resp = router
             .oneshot(token_form_request(
@@ -380,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_token_returns_400_for_unknown_grant() {
-        let (router, _) = build_test_router();
+        let router = build_test_router();
         let resp = router
             .oneshot(token_form_request("test", "grant_type=invalid"))
             .await
@@ -390,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn http_token_returns_404_for_unknown_realm() {
-        let (router, _) = build_test_router();
+        let router = build_test_router();
         let resp = router
             .oneshot(token_form_request(
                 "nonexistent",

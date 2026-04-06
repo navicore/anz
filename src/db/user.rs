@@ -20,7 +20,9 @@ fn parse_user_row(row: &Row) -> rusqlite::Result<User> {
         username: row.get(2)?,
         email: row.get(3)?,
         password_hash: row.get(4)?,
-        groups: serde_json::from_str(&groups_json).unwrap_or_default(),
+        groups: serde_json::from_str(&groups_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(e))
+        })?,
         created_at: chrono::DateTime::parse_from_rfc3339(&created_str)
             .unwrap_or_default()
             .with_timezone(&Utc),

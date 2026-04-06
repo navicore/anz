@@ -10,8 +10,12 @@ fn parse_client_row(row: &Row) -> rusqlite::Result<Client> {
     let secret_hash: Option<String> = row.get(5)?;
     let created_str: String = row.get(6)?;
 
-    let redirect_uris: Vec<String> = serde_json::from_str(&uris_json).unwrap_or_default();
-    let allowed_scopes: Vec<String> = serde_json::from_str(&scopes_json).unwrap_or_default();
+    let redirect_uris: Vec<String> = serde_json::from_str(&uris_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
+    })?;
+    let allowed_scopes: Vec<String> = serde_json::from_str(&scopes_json).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(e))
+    })?;
     let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
         .unwrap_or_default()
         .with_timezone(&Utc);
