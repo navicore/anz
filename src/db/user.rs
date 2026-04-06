@@ -4,8 +4,11 @@ use chrono::Utc;
 use rusqlite::{params, Connection, Row};
 use uuid::Uuid;
 
-const SELECT_COLS: &str =
-    "id, realm_id, username, email, password_hash, groups, created_at, updated_at";
+macro_rules! select_cols {
+    () => {
+        "id, realm_id, username, email, password_hash, groups, created_at, updated_at"
+    };
+}
 
 fn parse_user_row(row: &Row) -> rusqlite::Result<User> {
     let groups_json: String = row.get(5)?;
@@ -65,8 +68,11 @@ pub fn create_user(
 }
 
 pub fn list_users(conn: &Connection, realm_id: &str) -> Result<Vec<User>> {
-    let sql = format!("SELECT {SELECT_COLS} FROM users WHERE realm_id = ?1 ORDER BY username");
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(concat!(
+        "SELECT ",
+        select_cols!(),
+        " FROM users WHERE realm_id = ?1 ORDER BY username"
+    ))?;
     let rows = stmt.query_map(params![realm_id], parse_user_row)?;
     let mut users = Vec::new();
     for u in rows {
@@ -80,8 +86,11 @@ pub fn get_user_by_username(
     realm_id: &str,
     username: &str,
 ) -> Result<Option<User>> {
-    let sql = format!("SELECT {SELECT_COLS} FROM users WHERE realm_id = ?1 AND username = ?2");
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(concat!(
+        "SELECT ",
+        select_cols!(),
+        " FROM users WHERE realm_id = ?1 AND username = ?2"
+    ))?;
     let mut rows = stmt.query_map(params![realm_id, username], parse_user_row)?;
     match rows.next() {
         Some(u) => Ok(Some(u?)),
@@ -90,8 +99,11 @@ pub fn get_user_by_username(
 }
 
 pub fn get_user_by_id(conn: &Connection, user_id: &str) -> Result<Option<User>> {
-    let sql = format!("SELECT {SELECT_COLS} FROM users WHERE id = ?1");
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(concat!(
+        "SELECT ",
+        select_cols!(),
+        " FROM users WHERE id = ?1"
+    ))?;
     let mut rows = stmt.query_map(params![user_id], parse_user_row)?;
     match rows.next() {
         Some(u) => Ok(Some(u?)),
@@ -109,20 +121,22 @@ pub fn delete_user(conn: &Connection, realm_id: &str, username: &str) -> Result<
 
 pub fn update_password(conn: &Connection, user_id: &str, new_hash: &str) -> Result<()> {
     let now = Utc::now();
-    conn.execute(
+    let rows = conn.execute(
         "UPDATE users SET password_hash = ?1, updated_at = ?2 WHERE id = ?3",
         params![new_hash, now.to_rfc3339(), user_id],
     )?;
+    anyhow::ensure!(rows > 0, "user '{user_id}' not found");
     Ok(())
 }
 
 pub fn update_groups(conn: &Connection, user_id: &str, groups: &[String]) -> Result<()> {
     let now = Utc::now();
     let groups_json = serde_json::to_string(groups)?;
-    conn.execute(
+    let rows = conn.execute(
         "UPDATE users SET groups = ?1, updated_at = ?2 WHERE id = ?3",
         params![groups_json, now.to_rfc3339(), user_id],
     )?;
+    anyhow::ensure!(rows > 0, "user '{user_id}' not found");
     Ok(())
 }
 

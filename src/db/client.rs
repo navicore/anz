@@ -27,8 +27,11 @@ fn parse_client_row(row: &Row) -> rusqlite::Result<Client> {
     })
 }
 
-const SELECT_COLS: &str =
-    "id, realm_id, client_id, redirect_uris, allowed_scopes, client_secret_hash, created_at";
+macro_rules! select_cols {
+    () => {
+        "id, realm_id, client_id, redirect_uris, allowed_scopes, client_secret_hash, created_at"
+    };
+}
 
 pub fn create_client(
     conn: &Connection,
@@ -72,8 +75,11 @@ pub fn create_client(
 }
 
 pub fn list_clients(conn: &Connection, realm_id: &str) -> Result<Vec<Client>> {
-    let sql = format!("SELECT {SELECT_COLS} FROM clients WHERE realm_id = ?1 ORDER BY client_id");
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(concat!(
+        "SELECT ",
+        select_cols!(),
+        " FROM clients WHERE realm_id = ?1 ORDER BY client_id"
+    ))?;
     let rows = stmt.query_map(params![realm_id], parse_client_row)?;
     let mut clients = Vec::new();
     for r in rows {
@@ -87,8 +93,11 @@ pub fn get_client_by_client_id(
     realm_id: &str,
     client_id: &str,
 ) -> Result<Option<Client>> {
-    let sql = format!("SELECT {SELECT_COLS} FROM clients WHERE realm_id = ?1 AND client_id = ?2");
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(concat!(
+        "SELECT ",
+        select_cols!(),
+        " FROM clients WHERE realm_id = ?1 AND client_id = ?2"
+    ))?;
     let mut rows = stmt.query_map(params![realm_id, client_id], parse_client_row)?;
     match rows.next() {
         Some(r) => Ok(Some(r?)),

@@ -15,6 +15,7 @@ See [docs/design/sso-readiness.md](design/sso-readiness.md) for the SSO integrat
 
 ## Known Gaps
 
+- No client secret rotation — operators must delete and recreate the client to rotate a compromised secret. An `anz client rotate-secret` command would avoid reconfiguring dependent services.
 - No client credentials grant (only authorization_code and refresh_token)
 - No introspection endpoint (RFC 7662)
 - No scope enforcement beyond client-level allowed_scopes

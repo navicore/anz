@@ -263,14 +263,14 @@ fn verify_client_secret(
     client_id: &str,
     provided_secret: Option<&str>,
 ) -> Result<(), AppError> {
-    let client = db::client::get_client_by_client_id(conn, realm_id, client_id)?;
-    if let Some(client) = client {
-        if let Some(expected_hash) = &client.client_secret_hash {
-            let provided = provided_secret.unwrap_or("");
-            let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
-            if provided_hash != *expected_hash {
-                return Err(AppError::Unauthorized("invalid client_secret".to_string()));
-            }
+    let client = db::client::get_client_by_client_id(conn, realm_id, client_id)?
+        .ok_or_else(|| AppError::Unauthorized(format!("client '{client_id}' not found")))?;
+
+    if let Some(expected_hash) = &client.client_secret_hash {
+        let provided = provided_secret.unwrap_or("");
+        let provided_hash = crypto::hex_encode(&Sha256::digest(provided.as_bytes()));
+        if provided_hash != *expected_hash {
+            return Err(AppError::Unauthorized("invalid client_secret".to_string()));
         }
     }
     Ok(())
@@ -280,4 +280,54 @@ fn generate_random_token() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    fn setup() -> (rusqlite::Connection, String) {
+        let conn = crate::db::open_in_memory().unwrap();
+        let realm = crate::db::realm::create_realm(&conn, "test").unwrap();
+        (conn, realm.id)
+    }
+
+    #[test]
+    fn public_client_passes_without_secret() {
+        let (conn, realm_id) = setup();
+        db::client::create_client(&conn, &realm_id, "public-app", &[], None).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "public-app", None).is_ok());
+    }
+
+    #[test]
+    fn confidential_client_passes_with_correct_secret() {
+        let (conn, realm_id) = setup();
+        let secret = "my-secret-value";
+        let hash = crypto::hex_encode(&Sha256::digest(secret.as_bytes()));
+        db::client::create_client(&conn, &realm_id, "secure-app", &[], Some(&hash)).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "secure-app", Some(secret)).is_ok());
+    }
+
+    #[test]
+    fn confidential_client_rejects_wrong_secret() {
+        let (conn, realm_id) = setup();
+        let hash = crypto::hex_encode(&Sha256::digest(b"correct"));
+        db::client::create_client(&conn, &realm_id, "secure-app", &[], Some(&hash)).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "secure-app", Some("wrong")).is_err());
+    }
+
+    #[test]
+    fn confidential_client_rejects_missing_secret() {
+        let (conn, realm_id) = setup();
+        let hash = crypto::hex_encode(&Sha256::digest(b"secret"));
+        db::client::create_client(&conn, &realm_id, "secure-app", &[], Some(&hash)).unwrap();
+        assert!(verify_client_secret(&conn, &realm_id, "secure-app", None).is_err());
+    }
+
+    #[test]
+    fn missing_client_is_rejected() {
+        let (conn, realm_id) = setup();
+        assert!(verify_client_secret(&conn, &realm_id, "nonexistent", Some("any")).is_err());
+    }
 }

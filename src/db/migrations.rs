@@ -84,17 +84,31 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Check that a string is a safe SQL identifier (alphanumeric and underscores only).
+/// Table and column names cannot be parameterized in SQLite, so we must validate
+/// before interpolating into SQL strings.
+fn is_safe_identifier(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn add_column_if_missing(
     conn: &Connection,
     table: &str,
     column: &str,
     column_def: &str,
 ) -> rusqlite::Result<()> {
+    if !is_safe_identifier(table) || !is_safe_identifier(column) {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "unsafe identifier: table={table}, column={column}"
+        )));
+    }
+
     let sql = format!("PRAGMA table_info({table})");
     let mut stmt = conn.prepare(&sql)?;
-    let has_column = stmt
+    let columns: Vec<String> = stmt
         .query_map([], |row| row.get::<_, String>(1))?
-        .any(|name| name.as_deref() == Ok(column));
+        .collect::<Result<Vec<_>, _>>()?;
+    let has_column = columns.iter().any(|name| name == column);
 
     if !has_column {
         conn.execute_batch(&format!(
