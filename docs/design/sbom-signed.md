@@ -22,10 +22,17 @@ Two complementary SBOMs, both signed:
 
 **Signing:** Cosign keyless signing via GitHub OIDC (Sigstore). The image is signed, and the Cargo SBOM is attached as a CycloneDX attestation. Both are logged to the Rekor transparency log automatically.
 
-**Verification by operators:**
+**Verification by operators** (flags verify the signature came from our release workflow, not just any signer):
 ```sh
-cosign verify ghcr.io/navicore/anz:0.3.0
-cosign verify-attestation --type cyclonedx ghcr.io/navicore/anz:0.3.0
+cosign verify \
+  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  ghcr.io/navicore/anz:0.3.0
+
+cosign verify-attestation --type cyclonedx \
+  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  ghcr.io/navicore/anz:0.3.0
 ```
 
 ## Domain Events

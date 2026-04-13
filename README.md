@@ -106,8 +106,15 @@ Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
 
 **Verify a release** (replace tag with actual version, or use `@sha256:...` digest for strongest guarantee):
 ```sh
-cosign verify ghcr.io/navicore/anz:0.3.0
-cosign verify-attestation --type cyclonedx ghcr.io/navicore/anz:0.3.0
+cosign verify \
+  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  ghcr.io/navicore/anz:0.3.0
+
+cosign verify-attestation --type cyclonedx \
+  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  ghcr.io/navicore/anz:0.3.0
 ```
 
 All GitHub Actions are pinned to commit SHA (not version tags) to prevent supply chain attacks via tag mutation.
