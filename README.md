@@ -98,9 +98,19 @@ docker run -v ./anz.toml:/etc/anz/anz.toml -v ./data:/data -p 8080:8080 \
 Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
 1. Runs CI checks
 2. Bumps `Cargo.toml` version to match the tag and commits to main
-3. Builds and pushes a Docker image to GHCR
+3. Generates a CycloneDX SBOM from Cargo.lock
+4. Builds and pushes a Docker image to GHCR with SBOM and SLSA provenance attestations
+5. Signs the image and attaches the Cargo SBOM via Cosign (keyless, GitHub OIDC)
 
 **Required repo secret:** `PAT` (GitHub token with `contents: write`).
+
+**Verify a release:**
+```sh
+cosign verify ghcr.io/navicore/anz:0.3.0
+cosign verify-attestation --type cyclonedx ghcr.io/navicore/anz:0.3.0
+```
+
+All GitHub Actions are pinned to commit SHA (not version tags) to prevent supply chain attacks via tag mutation.
 
 ## Development
 
