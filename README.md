@@ -107,15 +107,17 @@ Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
 **Verify a release** (replace tag with actual version, or use `@sha256:...` digest for strongest guarantee):
 ```sh
 cosign verify \
-  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-identity-regexp "https://github.com/navicore/anz/.github/workflows/release.yml@refs/tags/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ghcr.io/navicore/anz:0.3.0
 
 cosign verify-attestation --type cyclonedx \
-  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-identity-regexp "https://github.com/navicore/anz/.github/workflows/release.yml@refs/tags/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ghcr.io/navicore/anz:0.3.0
 ```
+
+The identity uses `refs/tags/.*` because releases are triggered by tag creation — the OIDC token GitHub mints for the workflow records the tag ref, not `main`.
 
 All GitHub Actions are pinned to commit SHA (not version tags) to prevent supply chain attacks via tag mutation.
 

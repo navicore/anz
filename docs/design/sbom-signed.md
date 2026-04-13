@@ -25,15 +25,17 @@ Two complementary SBOMs, both signed:
 **Verification by operators** (flags verify the signature came from our release workflow, not just any signer):
 ```sh
 cosign verify \
-  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-identity-regexp "https://github.com/navicore/anz/.github/workflows/release.yml@refs/tags/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ghcr.io/navicore/anz:0.3.0
 
 cosign verify-attestation --type cyclonedx \
-  --certificate-identity "https://github.com/navicore/anz/.github/workflows/release.yml@refs/heads/main" \
+  --certificate-identity-regexp "https://github.com/navicore/anz/.github/workflows/release.yml@refs/tags/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ghcr.io/navicore/anz:0.3.0
 ```
+
+Identity is matched via `refs/tags/.*` regex because release workflows are triggered by tag creation — GitHub's OIDC token records the tag ref in the signing certificate, not `main`.
 
 ## Domain Events
 
