@@ -104,7 +104,7 @@ Create a GitHub release with a tag like `v0.2.0`. The workflow automatically:
 
 **Required repo secret:** `PAT` (GitHub token with `contents: write`).
 
-**Verify a release:**
+**Verify a release** (replace tag with actual version, or use `@sha256:...` digest for strongest guarantee):
 ```sh
 cosign verify ghcr.io/navicore/anz:0.3.0
 cosign verify-attestation --type cyclonedx ghcr.io/navicore/anz:0.3.0

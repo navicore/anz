@@ -48,4 +48,5 @@ No changes to anz's runtime behavior. No new endpoints, config, or database chan
 ## Decisions
 
 - **Pin all Actions to SHA** as part of this work. Every `uses:` in every workflow gets pinned to full commit SHA with a version comment. No separate hardening pass — do it once, do it now.
-- **SLSA provenance attestations:** Yes. BuildKit generates these with `--attest type=provenance` at no additional cost. Provenance answers "who built this and from what source", SBOM answers "what's inside it". Both matter.
+- **SLSA provenance attestations:** Yes. BuildKit generates these with `provenance: true` at no additional cost. This produces SLSA Level 1 (builder-produced) provenance — not L2/L3. Provenance answers "who built this and from what source", SBOM answers "what's inside it". Both matter.
+- **Claude Code Action workflows** (`claude.yml`, `claude-code-review.yml`) stay on version tags (`@v1`), not SHA pins. The Action validates that the workflow file on the PR branch matches main — SHA-pinning on a PR would break this validation until merged.

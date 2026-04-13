@@ -42,6 +42,11 @@ jobs:
           ref: main
           token: ${{ secrets.PAT }}
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: "1.93.0"
+
       - name: Extract version from tag
         id: version
         run: |
@@ -92,9 +97,15 @@ jobs:
         with:
           toolchain: "1.93.0"
 
+      - name: Cache cargo-cyclonedx
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cargo/bin/cargo-cyclonedx
+          key: cargo-cyclonedx-${{ runner.os }}
+
       - name: Generate Cargo SBOM (CycloneDX)
         run: |
-          cargo install cargo-cyclonedx --locked
+          command -v cargo-cyclonedx || cargo install cargo-cyclonedx --locked
           cargo cyclonedx --format json --output-file cargo-sbom.cdx.json
 
       - name: Install Cosign
