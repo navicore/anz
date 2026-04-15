@@ -58,7 +58,7 @@ pub fn handle(action: ClientAction, conn: &Connection) -> Result<()> {
 
             let (raw_secret, secret_hash) = if secret {
                 let mut bytes = [0u8; 32];
-                rand::thread_rng().fill_bytes(&mut bytes);
+                rand::rng().fill_bytes(&mut bytes);
                 let raw = URL_SAFE_NO_PAD.encode(bytes);
                 let hash = crypto::hex_encode(&Sha256::digest(raw.as_bytes()));
                 (Some(raw), Some(hash))

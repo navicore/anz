@@ -5,7 +5,7 @@ use subtle::ConstantTimeEq;
 /// Generate a random CSRF token (32 bytes, base64url-encoded).
 pub fn generate_csrf_token() -> String {
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

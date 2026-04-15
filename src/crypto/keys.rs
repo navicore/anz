@@ -2,11 +2,16 @@ use anyhow::Result;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ed25519_dalek::pkcs8::{DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{SigningKey, VerifyingKey};
+// ed25519-dalek 2.x still depends on rand_core 0.6; the `rand` crate at 0.9 uses
+// rand_core 0.9, which is a different trait family. We reach through
+// `password_hash` (already in the tree via argon2) to get rand_core 0.6's OsRng,
+// which satisfies ed25519-dalek's CryptoRngCore bound.
+use password_hash::rand_core::OsRng;
 use serde_json::{json, Value};
 
 /// Generate a new Ed25519 keypair. Returns (private_key_pem, public_key_pem, kid).
 pub fn generate_ed25519_keypair() -> Result<(String, String, String)> {
-    let mut rng = rand::thread_rng();
+    let mut rng = OsRng;
     let signing_key = SigningKey::generate(&mut rng);
     let verifying_key = signing_key.verifying_key();
 
