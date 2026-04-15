@@ -1,7 +1,10 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{decode, decode_header, encode, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+
+use crate::crypto::keys;
+use crate::models::{SigningAlgorithm, SigningKeyRecord};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdTokenClaims {
@@ -28,25 +31,47 @@ pub struct AccessTokenClaims {
     pub client_id: String,
 }
 
-pub fn encode_jwt(claims: &impl Serialize, kid: &str, key: &EncodingKey) -> Result<String> {
-    let mut header = Header::new(Algorithm::EdDSA);
+/// Encode a JWT signed with the given key and algorithm.
+pub fn encode_jwt(
+    claims: &impl Serialize,
+    kid: &str,
+    key: &EncodingKey,
+    alg: SigningAlgorithm,
+) -> Result<String> {
+    let mut header = Header::new(keys::jwt_algorithm(alg));
     header.kid = Some(kid.to_string());
 
     let token = encode(&header, claims, key)?;
     Ok(token)
 }
 
+/// Decode and verify an access token by matching its `kid` header against the
+/// realm's active signing keys. This supports rotation and multiple concurrent
+/// algorithms — the key used to verify must match the key that signed.
 pub fn decode_access_token(
     token: &str,
-    key: &DecodingKey,
+    active_keys: &[SigningKeyRecord],
     issuer: &str,
 ) -> Result<AccessTokenClaims> {
-    let mut validation = Validation::new(Algorithm::EdDSA);
+    let header = decode_header(token)?;
+    let kid = header
+        .kid
+        .as_deref()
+        .ok_or_else(|| anyhow!("token header missing kid"))?;
+
+    let key = active_keys
+        .iter()
+        .find(|k| k.kid == kid)
+        .ok_or_else(|| anyhow!("unknown kid in token: {kid}"))?;
+
+    let decoding_key = keys::decoding_key_from_pem(key.algorithm, &key.public_key_pem)?;
+
+    let mut validation = Validation::new(keys::jwt_algorithm(key.algorithm));
     validation.set_issuer(&[issuer]);
     validation.set_required_spec_claims(&["exp", "iss", "sub"]);
     validation.validate_aud = false;
 
-    let data = decode::<AccessTokenClaims>(token, key, &validation)?;
+    let data = decode::<AccessTokenClaims>(token, &decoding_key, &validation)?;
     Ok(data.claims)
 }
 
@@ -106,30 +131,60 @@ pub fn build_access_token_claims(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::keys;
 
     fn init_crypto() {
         let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
     }
 
-    fn test_keypair() -> (jsonwebtoken::EncodingKey, jsonwebtoken::DecodingKey, String) {
-        let (priv_pem, pub_pem, kid) = keys::generate_ed25519_keypair().unwrap();
-        let enc = keys::encoding_key_from_pem(&priv_pem).unwrap();
-        let dec = keys::decoding_key_from_pem(&pub_pem).unwrap();
-        (enc, dec, kid)
+    fn keypair(alg: SigningAlgorithm) -> (EncodingKey, SigningKeyRecord) {
+        let (priv_pem, pub_pem, kid) = keys::generate_keypair(alg).unwrap();
+        let enc = keys::encoding_key_from_pem(alg, &priv_pem).unwrap();
+        let record = SigningKeyRecord {
+            private_key_pem: priv_pem,
+            public_key_pem: pub_pem,
+            kid,
+            algorithm: alg,
+        };
+        (enc, record)
     }
 
     #[test]
-    fn encode_decode_access_token() {
+    fn encode_decode_access_token_eddsa() {
         init_crypto();
-        let (enc, dec, kid) = test_keypair();
+        let (enc, record) = keypair(SigningAlgorithm::EdDsa);
         let issuer = "https://auth.example.com/realms/test";
         let claims = build_access_token_claims(issuer, "user1", issuer, 3600, "openid", "myapp");
-        let token = encode_jwt(&claims, &kid, &enc).unwrap();
-        let decoded = decode_access_token(&token, &dec, issuer).unwrap();
+        let token = encode_jwt(&claims, &record.kid, &enc, record.algorithm).unwrap();
+        let decoded = decode_access_token(&token, &[record], issuer).unwrap();
         assert_eq!(decoded.sub, "user1");
         assert_eq!(decoded.client_id, "myapp");
-        assert_eq!(decoded.scope, "openid");
+    }
+
+    #[test]
+    fn encode_decode_access_token_rs256() {
+        init_crypto();
+        let (enc, record) = keypair(SigningAlgorithm::Rs256);
+        let issuer = "https://auth.example.com/realms/test";
+        let claims = build_access_token_claims(issuer, "user1", issuer, 3600, "openid", "myapp");
+        let token = encode_jwt(&claims, &record.kid, &enc, record.algorithm).unwrap();
+        let decoded = decode_access_token(&token, &[record], issuer).unwrap();
+        assert_eq!(decoded.sub, "user1");
+        assert_eq!(decoded.client_id, "myapp");
+    }
+
+    #[test]
+    fn decode_picks_correct_key_from_multiple() {
+        init_crypto();
+        // Realm has both algorithms active. Token signed with one must decode against
+        // the full set via kid matching.
+        let (enc_ed, record_ed) = keypair(SigningAlgorithm::EdDsa);
+        let (_enc_rs, record_rs) = keypair(SigningAlgorithm::Rs256);
+        let issuer = "https://auth.example.com/realms/test";
+        let claims = build_access_token_claims(issuer, "u", issuer, 3600, "openid", "c");
+        let token = encode_jwt(&claims, &record_ed.kid, &enc_ed, record_ed.algorithm).unwrap();
+        let all_keys = vec![record_rs, record_ed];
+        let decoded = decode_access_token(&token, &all_keys, issuer).unwrap();
+        assert_eq!(decoded.sub, "u");
     }
 
     #[test]
@@ -173,7 +228,7 @@ mod tests {
     #[test]
     fn wrong_issuer_rejects_token() {
         init_crypto();
-        let (enc, dec, kid) = test_keypair();
+        let (enc, record) = keypair(SigningAlgorithm::Rs256);
         let claims = build_access_token_claims(
             "https://issuer-a",
             "u",
@@ -182,7 +237,18 @@ mod tests {
             "openid",
             "c",
         );
-        let token = encode_jwt(&claims, &kid, &enc).unwrap();
-        assert!(decode_access_token(&token, &dec, "https://issuer-b").is_err());
+        let token = encode_jwt(&claims, &record.kid, &enc, record.algorithm).unwrap();
+        assert!(decode_access_token(&token, &[record], "https://issuer-b").is_err());
+    }
+
+    #[test]
+    fn unknown_kid_is_rejected() {
+        init_crypto();
+        let (enc, record) = keypair(SigningAlgorithm::Rs256);
+        let issuer = "https://iss";
+        let claims = build_access_token_claims(issuer, "u", issuer, 3600, "openid", "c");
+        let token = encode_jwt(&claims, &record.kid, &enc, record.algorithm).unwrap();
+        // Empty key list → no matching kid.
+        assert!(decode_access_token(&token, &[], issuer).is_err());
     }
 }

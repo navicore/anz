@@ -21,7 +21,7 @@ pub async fn jwks(
     let keys = db::signing_key::get_all_active_keys(&conn, &realm_obj.id)?;
     let mut jwks = Vec::new();
     for k in keys {
-        let jwk = public_key_to_jwk(&k.public_key_pem, &k.kid)
+        let jwk = public_key_to_jwk(k.algorithm, &k.public_key_pem, &k.kid)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         jwks.push(jwk);
     }
