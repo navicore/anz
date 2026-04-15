@@ -109,13 +109,14 @@ fn handle_authorization_code(
     let user = db::user::get_user_by_id(conn, &auth_code.user_id)?
         .ok_or_else(|| AppError::Internal("user not found".to_string()))?;
 
-    // Get signing key
-    let signing_key = db::signing_key::get_active_signing_key(conn, realm_id)?
+    // Get signing key (prefers RS256 over EdDSA when both are active in the realm)
+    let signing_key = db::signing_key::get_preferred_signing_key(conn, realm_id)?
         .ok_or_else(|| AppError::Internal("no signing key found".to_string()))?;
 
     let issuer = format!("{}/realms/{}", state.config.issuer_base_url, realm);
-    let encoding_key = keys::encoding_key_from_pem(&signing_key.private_key_pem)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let encoding_key =
+        keys::encoding_key_from_pem(signing_key.algorithm, &signing_key.private_key_pem)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Build ID token (groups only included when "groups" scope is requested)
     let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
@@ -129,8 +130,13 @@ fn handle_authorization_code(
         groups: &user.groups,
         scopes: &auth_code.scopes,
     });
-    let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let id_token = jwt::encode_jwt(
+        &id_claims,
+        &signing_key.kid,
+        &encoding_key,
+        signing_key.algorithm,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Build access token
     let access_claims = jwt::build_access_token_claims(
@@ -141,8 +147,13 @@ fn handle_authorization_code(
         &auth_code.scopes,
         &auth_code.client_id,
     );
-    let access_token = jwt::encode_jwt(&access_claims, &signing_key.kid, &encoding_key)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let access_token = jwt::encode_jwt(
+        &access_claims,
+        &signing_key.kid,
+        &encoding_key,
+        signing_key.algorithm,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // Issue refresh token (preserves nonce so refresh-issued ID tokens echo it, per OIDC Core § 12)
     let raw_refresh = generate_random_token();
@@ -205,13 +216,14 @@ fn handle_refresh_token(
     let user = db::user::get_user_by_id(conn, &old_token.user_id)?
         .ok_or_else(|| AppError::Internal("user not found".to_string()))?;
 
-    // Get signing key
-    let signing_key = db::signing_key::get_active_signing_key(conn, realm_id)?
+    // Get signing key (prefers RS256 over EdDSA when both are active in the realm)
+    let signing_key = db::signing_key::get_preferred_signing_key(conn, realm_id)?
         .ok_or_else(|| AppError::Internal("no signing key found".to_string()))?;
 
     let issuer = format!("{}/realms/{}", state.config.issuer_base_url, realm);
-    let encoding_key = keys::encoding_key_from_pem(&signing_key.private_key_pem)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let encoding_key =
+        keys::encoding_key_from_pem(signing_key.algorithm, &signing_key.private_key_pem)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // New access token
     let access_claims = jwt::build_access_token_claims(
@@ -222,8 +234,13 @@ fn handle_refresh_token(
         &old_token.scopes,
         &old_token.client_id,
     );
-    let access_token = jwt::encode_jwt(&access_claims, &signing_key.kid, &encoding_key)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let access_token = jwt::encode_jwt(
+        &access_claims,
+        &signing_key.kid,
+        &encoding_key,
+        signing_key.algorithm,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // New ID token (echo the original nonce per OIDC Core § 12)
     let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
@@ -237,8 +254,13 @@ fn handle_refresh_token(
         groups: &user.groups,
         scopes: &old_token.scopes,
     });
-    let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let id_token = jwt::encode_jwt(
+        &id_claims,
+        &signing_key.kid,
+        &encoding_key,
+        signing_key.algorithm,
+    )
+    .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // New refresh token (rotation; preserves original nonce across refreshes)
     let new_raw_refresh = generate_random_token();
@@ -334,7 +356,9 @@ mod tests {
 
     fn setup() -> (rusqlite::Connection, String) {
         let conn = crate::db::open_in_memory().unwrap();
-        let realm = crate::db::realm::create_realm(&conn, "test").unwrap();
+        let realm =
+            crate::db::realm::create_realm(&conn, "test", crate::models::SigningAlgorithm::EdDsa)
+                .unwrap();
         (conn, realm.id)
     }
 
@@ -384,7 +408,8 @@ mod tests {
 
     fn build_test_router() -> axum::Router {
         let conn = crate::db::open_in_memory().unwrap();
-        crate::db::realm::create_realm(&conn, "test").unwrap();
+        crate::db::realm::create_realm(&conn, "test", crate::models::SigningAlgorithm::EdDsa)
+            .unwrap();
         let audit = crate::audit::AuditLogger::new(false, "/dev/null");
         let config = crate::config::Config::default();
         crate::server::build_router(config, conn, audit)

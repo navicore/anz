@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use super::error::AppError;
 use super::AppState;
 use crate::audit::{AuditAction, LogEventParams};
-use crate::crypto::{keys, password as pw, token as jwt};
+use crate::crypto::{password as pw, token as jwt};
 use crate::db;
 
 #[derive(Debug, Deserialize)]
@@ -32,14 +32,12 @@ pub async fn change_password(
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
-    let signing_key = db::signing_key::get_active_signing_key(&conn, &realm_obj.id)?
-        .ok_or_else(|| AppError::Internal("no signing key found".to_string()))?;
-
+    // Pass every stored key (active + deactivated) so tokens signed before a rotation
+    // still verify until operators hard-delete the old key.
+    let verification_keys = db::signing_key::get_all_keys(&conn, &realm_obj.id)?;
     let issuer = format!("{}/realms/{}", state.config.issuer_base_url, realm);
-    let decoding_key = keys::decoding_key_from_pem(&signing_key.public_key_pem)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let claims = jwt::decode_access_token(&bearer, &decoding_key, &issuer)
+    let claims = jwt::decode_access_token(&bearer, &verification_keys, &issuer)
         .map_err(|_| AppError::Unauthorized("invalid access token".to_string()))?;
 
     let user = db::user::get_user_by_id(&conn, &claims.sub)?

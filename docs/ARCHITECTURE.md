@@ -45,7 +45,7 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 
 - **User** — username + email + Argon2id password hash + groups (JSON array), unique per realm
 - **Client** — client_id + redirect_uris (JSON) + allowed_scopes + optional client_secret_hash (SHA-256), unique per realm. Clients with a secret are confidential; those without are public (PKCE-only).
-- **SigningKey** — Ed25519 key pair (PEM-encoded), one active per realm, kid in JWT headers
+- **SigningKey** — key pair (PEM-encoded) tagged with algorithm (RS256 or EdDSA), kid in JWT headers. A realm may have multiple active keys (across algorithms) simultaneously; the token endpoint prefers RS256 for signing when both are present, and verification dispatches on the token's `kid` header.
 - **AuthorizationCode** — single-use, 5-min TTL, stores PKCE code_challenge, stored as SHA-256 hash
 - **RefreshToken** — 30-day TTL, supports rotation (revoked on use), stored as SHA-256 hash
 - **Session** — 24-hour browser session, cookie-based, stored as SHA-256 hash

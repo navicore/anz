@@ -82,6 +82,14 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     add_column_if_missing(conn, "users", "groups", "TEXT NOT NULL DEFAULT '[]'")?;
     add_column_if_missing(conn, "authorization_codes", "nonce", "TEXT")?;
     add_column_if_missing(conn, "refresh_tokens", "nonce", "TEXT")?;
+    // Existing keys were all Ed25519 (EdDSA); default new column accordingly so
+    // existing realms keep working without manual backfill.
+    add_column_if_missing(
+        conn,
+        "signing_keys",
+        "algorithm",
+        "TEXT NOT NULL DEFAULT 'EdDSA'",
+    )?;
 
     Ok(())
 }

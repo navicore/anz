@@ -14,7 +14,7 @@ a reverse proxy and protect a handful of personal apps.
 
 - **Multi-realm** — isolated identity domains (users, clients, tokens)
 - **OIDC authorization code flow** with PKCE
-- **Ed25519 signing** (per-realm keys)
+- **Multi-algorithm signing** — RS256 (default, required by Kubernetes) or EdDSA, per-realm, with concurrent keys during rotation
 - **Argon2id** password hashing
 - **Refresh token rotation** with RFC 7009 revocation
 - **Confidential clients** — optional client_secret for server-side apps (Forgejo, etc.)
@@ -69,9 +69,12 @@ All endpoints are realm-scoped:
 ## CLI
 
 ```
-anz realm create <name>
+anz realm create <name> [--key-type rs256|ed25519]   # defaults to rs256
 anz realm list
 anz realm delete <name>
+anz realm rotate-key --realm <r> --key-type rs256|ed25519
+anz realm deactivate-key --realm <r> --kid <kid>  # stops signing; kid still in JWKS
+anz realm delete-key --realm <r> --kid <kid>      # removes kid from JWKS entirely
 anz user add --realm <r> --username <u> --email <e> [--groups admin,dev]
 anz user update-groups --realm <r> --username <u> --groups <g1,g2>
 anz user list --realm <r>
