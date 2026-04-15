@@ -12,6 +12,7 @@ pub struct NewAuthCode<'a> {
     pub redirect_uri: &'a str,
     pub scopes: &'a str,
     pub code_challenge: &'a str,
+    pub nonce: Option<&'a str>,
     pub expires_at: chrono::DateTime<Utc>,
 }
 
@@ -19,8 +20,8 @@ pub struct NewAuthCode<'a> {
 pub fn insert_auth_code(conn: &Connection, code: &NewAuthCode) -> Result<String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO authorization_codes (id, realm_id, client_id, user_id, code_hash, redirect_uri, scopes, code_challenge, expires_at, used)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0)",
+        "INSERT INTO authorization_codes (id, realm_id, client_id, user_id, code_hash, redirect_uri, scopes, code_challenge, nonce, expires_at, used)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
         params![
             id,
             code.realm_id,
@@ -30,6 +31,7 @@ pub fn insert_auth_code(conn: &Connection, code: &NewAuthCode) -> Result<String>
             code.redirect_uri,
             code.scopes,
             code.code_challenge,
+            code.nonce,
             code.expires_at.to_rfc3339(),
         ],
     )?;
@@ -42,7 +44,7 @@ pub fn consume_auth_code(conn: &Connection, code_hash: &str) -> Result<Option<Au
     let now = Utc::now().to_rfc3339();
 
     let mut stmt = conn.prepare(
-        "SELECT id, client_id, user_id, redirect_uri, scopes, code_challenge
+        "SELECT id, client_id, user_id, redirect_uri, scopes, code_challenge, nonce
          FROM authorization_codes
          WHERE code_hash = ?1 AND used = 0 AND expires_at > ?2",
     )?;
@@ -54,6 +56,7 @@ pub fn consume_auth_code(conn: &Connection, code_hash: &str) -> Result<Option<Au
             redirect_uri: row.get(3)?,
             scopes: row.get(4)?,
             code_challenge: row.get(5)?,
+            nonce: row.get(6)?,
         })
     })?;
 
@@ -96,6 +99,7 @@ mod tests {
             redirect_uri: "http://localhost/cb",
             scopes: "openid",
             code_challenge: "challenge",
+            nonce: None,
             expires_at: Utc::now() + Duration::minutes(5),
         };
         insert_auth_code(&conn, &code).unwrap();
@@ -116,6 +120,7 @@ mod tests {
             redirect_uri: "http://localhost/cb",
             scopes: "openid",
             code_challenge: "ch",
+            nonce: None,
             expires_at: Utc::now() + Duration::minutes(5),
         };
         insert_auth_code(&conn, &code).unwrap();
@@ -134,6 +139,7 @@ mod tests {
             redirect_uri: "http://localhost/cb",
             scopes: "openid",
             code_challenge: "ch",
+            nonce: None,
             expires_at: Utc::now() - Duration::minutes(1),
         };
         insert_auth_code(&conn, &code).unwrap();

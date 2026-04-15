@@ -39,6 +39,7 @@ pub struct AuthorizationCode {
     pub redirect_uri: String,
     pub scopes: String,
     pub code_challenge: String,
+    pub nonce: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ pub struct RefreshToken {
     pub client_id: String,
     pub user_id: String,
     pub scopes: String,
+    pub nonce: Option<String>,
 }
 
 #[derive(Debug, Clone)]

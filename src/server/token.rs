@@ -125,7 +125,7 @@ fn handle_authorization_code(
         lifetime_secs: state.config.id_token_lifetime_secs,
         username: &user.username,
         email: &user.email,
-        nonce: None,
+        nonce: auth_code.nonce.clone(),
         groups: &user.groups,
         scopes: &auth_code.scopes,
     });
@@ -144,19 +144,22 @@ fn handle_authorization_code(
     let access_token = jwt::encode_jwt(&access_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // Issue refresh token
+    // Issue refresh token (preserves nonce so refresh-issued ID tokens echo it, per OIDC Core § 12)
     let raw_refresh = generate_random_token();
     let refresh_hash = crypto::hex_encode(&Sha256::digest(raw_refresh.as_bytes()));
     let refresh_lifetime = Duration::seconds(state.config.refresh_token_lifetime_secs as i64);
     let refresh_expires = Utc::now() + refresh_lifetime;
     db::refresh_token::insert_refresh_token(
         conn,
-        realm_id,
-        &auth_code.client_id,
-        &user.id,
-        &refresh_hash,
-        &auth_code.scopes,
-        refresh_expires,
+        &db::refresh_token::NewRefreshToken {
+            realm_id,
+            client_id: &auth_code.client_id,
+            user_id: &user.id,
+            token_hash: &refresh_hash,
+            scopes: &auth_code.scopes,
+            nonce: auth_code.nonce.as_deref(),
+            expires_at: refresh_expires,
+        },
     )?;
 
     state.audit.log_event(LogEventParams {
@@ -222,7 +225,7 @@ fn handle_refresh_token(
     let access_token = jwt::encode_jwt(&access_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // New ID token
+    // New ID token (echo the original nonce per OIDC Core § 12)
     let id_claims = jwt::build_id_token_claims(&jwt::IdTokenParams {
         issuer: &issuer,
         sub: &user.id,
@@ -230,26 +233,29 @@ fn handle_refresh_token(
         lifetime_secs: state.config.id_token_lifetime_secs,
         username: &user.username,
         email: &user.email,
-        nonce: None,
+        nonce: old_token.nonce.clone(),
         groups: &user.groups,
         scopes: &old_token.scopes,
     });
     let id_token = jwt::encode_jwt(&id_claims, &signing_key.kid, &encoding_key)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // New refresh token (rotation)
+    // New refresh token (rotation; preserves original nonce across refreshes)
     let new_raw_refresh = generate_random_token();
     let new_refresh_hash = crypto::hex_encode(&Sha256::digest(new_raw_refresh.as_bytes()));
     let refresh_lifetime = Duration::seconds(state.config.refresh_token_lifetime_secs as i64);
     let refresh_expires = Utc::now() + refresh_lifetime;
     db::refresh_token::insert_refresh_token(
         conn,
-        realm_id,
-        &old_token.client_id,
-        &user.id,
-        &new_refresh_hash,
-        &old_token.scopes,
-        refresh_expires,
+        &db::refresh_token::NewRefreshToken {
+            realm_id,
+            client_id: &old_token.client_id,
+            user_id: &user.id,
+            token_hash: &new_refresh_hash,
+            scopes: &old_token.scopes,
+            nonce: old_token.nonce.as_deref(),
+            expires_at: refresh_expires,
+        },
     )?;
 
     state.audit.log_event(LogEventParams {

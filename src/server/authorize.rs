@@ -357,6 +357,7 @@ fn generate_auth_code_redirect_inner(
             redirect_uri: &q.redirect_uri,
             scopes: q.scope.as_deref().unwrap_or("openid"),
             code_challenge: q.code_challenge.as_deref().unwrap_or(""),
+            nonce: q.nonce.as_deref(),
             expires_at,
         },
     )?;

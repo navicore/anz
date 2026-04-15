@@ -80,6 +80,8 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     // so we check the schema first.
     add_column_if_missing(conn, "clients", "client_secret_hash", "TEXT")?;
     add_column_if_missing(conn, "users", "groups", "TEXT NOT NULL DEFAULT '[]'")?;
+    add_column_if_missing(conn, "authorization_codes", "nonce", "TEXT")?;
+    add_column_if_missing(conn, "refresh_tokens", "nonce", "TEXT")?;
 
     Ok(())
 }
