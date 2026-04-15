@@ -1,6 +1,6 @@
 [package]
 name = "anz"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 description = "A minimal, personal OIDC provider for securing small web applications"
 license = "MIT"
