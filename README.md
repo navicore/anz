@@ -73,7 +73,8 @@ anz realm create <name> [--key-type rs256|ed25519]   # defaults to rs256
 anz realm list
 anz realm delete <name>
 anz realm rotate-key --realm <r> --key-type rs256|ed25519
-anz realm deactivate-key --realm <r> --kid <kid>
+anz realm deactivate-key --realm <r> --kid <kid>  # stops signing; kid still in JWKS
+anz realm delete-key --realm <r> --kid <kid>      # removes kid from JWKS entirely
 anz user add --realm <r> --username <u> --email <e> [--groups admin,dev]
 anz user update-groups --realm <r> --username <u> --groups <g1,g2>
 anz user list --realm <r>

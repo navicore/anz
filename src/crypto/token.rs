@@ -158,6 +158,7 @@ mod tests {
         let decoded = decode_access_token(&token, &[record], issuer).unwrap();
         assert_eq!(decoded.sub, "user1");
         assert_eq!(decoded.client_id, "myapp");
+        assert_eq!(decoded.scope, "openid");
     }
 
     #[test]
@@ -169,6 +170,7 @@ mod tests {
         let token = encode_jwt(&claims, &record.kid, &enc, record.algorithm).unwrap();
         let decoded = decode_access_token(&token, &[record], issuer).unwrap();
         assert_eq!(decoded.sub, "user1");
+        assert_eq!(decoded.scope, "openid");
         assert_eq!(decoded.client_id, "myapp");
     }
 

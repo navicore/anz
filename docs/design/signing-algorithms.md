@@ -39,18 +39,21 @@ Algorithm becomes a property of each `SigningKey` row, not the realm. A realm ca
 
 - **`anz realm create --key-type rsa`** → generates 2048-bit RSA keypair → inserts signing_key row with algorithm=RS256, active=1.
 - **`anz realm rotate-key`** → generates new keypair → inserts new active row. Existing key stays active (JWKS still serves it, token signing still picks one per algorithm).
-- **Token endpoint** → selects signing key based on active keys in the realm. Default preference order when multiple algorithms present: RS256, then EdDSA.
-- **JWKS endpoint** → returns every active key, correctly formatted per algorithm.
-- **Discovery endpoint** → `id_token_signing_alg_values_supported` reflects the realm's actual active-key algorithms.
+- **`anz realm deactivate-key`** → flips active=1 to active=0 on a specific kid. The key is no longer used for signing new tokens, but stays in JWKS and verification for outstanding tokens.
+- **`anz realm delete-key`** → hard-deletes the row. Key is gone from JWKS and verification. Run this only after the longest outstanding token lifetime has passed.
+- **Token endpoint** → selects signing key from active-only set. Default preference when multiple algorithms present: RS256, then EdDSA.
+- **JWKS endpoint** → returns every stored key (active and deactivated). Verification accepts tokens signed by any of them. This is what keeps rotations lossless.
+- **Discovery endpoint** → `id_token_signing_alg_values_supported` reflects the realm's **signing-eligible** (active) algorithms — not verification-only ones — because it describes what new tokens will be signed with.
 
 ## Migration Path for Existing Realms
 
 Your `homelab` realm currently has an Ed25519 key. After this change ships:
 
-1. `anz realm rotate-key --realm homelab --alg RS256` — generates a new RS256 key alongside the Ed25519 one.
+1. `anz realm rotate-key --realm homelab --key-type rs256` — generates a new RS256 key alongside the Ed25519 one.
 2. JWKS now serves both. Token issuance prefers RS256 (new K8s-compatible tokens).
 3. Existing outstanding tokens (signed with Ed25519) keep verifying against the JWKS until they expire.
-4. Optionally, `anz realm deactivate-key --realm homelab --kid <old-ed25519-kid>` after max token lifetime passes.
+4. `anz realm deactivate-key --realm homelab --kid <old-ed25519-kid>` — stops signing new tokens with Ed25519 while leaving it in JWKS and verification so outstanding tokens continue to work.
+5. After max refresh-token lifetime (default 30 days), `anz realm delete-key --realm homelab --kid <old-ed25519-kid>` to fully retire it.
 
 No downtime, no client reconfiguration, no user re-authentication.
 

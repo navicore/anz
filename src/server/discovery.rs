@@ -17,11 +17,19 @@ pub async fn openid_configuration(
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
-    // Derive the signing algorithms we advertise from the realm's actual active keys.
+    // Derive the signing algorithms we advertise from the realm's signing-eligible
+    // keys (deactivated keys are verification-only and don't get advertised here).
     // Deduplicate while preserving order (RS256 sorted before EdDSA by our convention).
-    let active_keys = db::signing_key::get_all_active_keys(&conn, &realm_obj.id)?;
+    let signing_keys = db::signing_key::get_signing_keys(&conn, &realm_obj.id)?;
+    if signing_keys.is_empty() {
+        // A realm with no signing-eligible keys is misconfigured — we can't issue tokens.
+        // Surface that explicitly rather than advertising a false capability.
+        return Err(AppError::Internal(format!(
+            "realm '{realm}' has no active signing keys"
+        )));
+    }
     let mut algs: Vec<&'static str> = Vec::new();
-    for k in &active_keys {
+    for k in &signing_keys {
         let s = k.algorithm.as_jwt_alg();
         if !algs.contains(&s) {
             algs.push(s);
@@ -32,10 +40,6 @@ pub async fn openid_configuration(
         "EdDSA" => 1,
         _ => 99,
     });
-    // Fallback for realms with no active keys — unusual but don't return an empty list.
-    if algs.is_empty() {
-        algs.push("RS256");
-    }
 
     let issuer = format!("{}/realms/{}", state.config.issuer_base_url, realm);
 

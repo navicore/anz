@@ -18,7 +18,9 @@ pub async fn jwks(
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
-    let keys = db::signing_key::get_all_active_keys(&conn, &realm_obj.id)?;
+    // Serve every stored key — active and deactivated. Deactivated keys must remain
+    // discoverable so clients can still verify tokens signed before the rotation.
+    let keys = db::signing_key::get_all_keys(&conn, &realm_obj.id)?;
     let mut jwks = Vec::new();
     for k in keys {
         let jwk = public_key_to_jwk(k.algorithm, &k.public_key_pem, &k.kid)

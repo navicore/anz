@@ -64,6 +64,17 @@ pub enum RealmAction {
         #[arg(long)]
         kid: String,
     },
+    /// Hard-delete a signing key from JWKS and verification entirely. Outstanding tokens
+    /// signed with this key will fail immediately. Run this only after the longest
+    /// outstanding token lifetime has passed (refresh tokens default to 30 days).
+    DeleteKey {
+        /// Realm name
+        #[arg(long)]
+        realm: String,
+        /// The kid (key id) to delete
+        #[arg(long)]
+        kid: String,
+    },
 }
 
 pub fn handle(action: RealmAction, conn: &Connection) -> Result<()> {
@@ -125,8 +136,23 @@ pub fn handle(action: RealmAction, conn: &Connection) -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("Realm '{realm}' not found"))?;
             if db::signing_key::deactivate_signing_key(conn, &realm_obj.id, &kid)? {
                 println!("Deactivated signing key '{kid}' in realm '{realm}'");
+                println!(
+                    "  Public material stays in JWKS and tokens signed with it still verify until you run `anz realm delete-key`."
+                );
             } else {
                 bail!("No active signing key with kid '{kid}' in realm '{realm}'");
+            }
+        }
+        RealmAction::DeleteKey { realm, kid } => {
+            let realm_obj = db::realm::get_realm_by_name(conn, &realm)?
+                .ok_or_else(|| anyhow::anyhow!("Realm '{realm}' not found"))?;
+            if db::signing_key::delete_signing_key(conn, &realm_obj.id, &kid)? {
+                println!("Deleted signing key '{kid}' from realm '{realm}'");
+                println!(
+                    "  Any outstanding tokens signed with this key will now fail verification."
+                );
+            } else {
+                bail!("No signing key with kid '{kid}' in realm '{realm}'");
             }
         }
     }

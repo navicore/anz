@@ -22,12 +22,12 @@ pub async fn userinfo(
     let realm_obj = db::realm::get_realm_by_name(&conn, &realm)?
         .ok_or_else(|| AppError::NotFound(format!("realm '{realm}' not found")))?;
 
-    // Pass the realm's full set of active keys; decode_access_token dispatches on
-    // the token's kid header so any active key can verify its own tokens.
-    let active_keys = db::signing_key::get_all_active_keys(&conn, &realm_obj.id)?;
+    // Pass every stored key (active + deactivated); decode_access_token dispatches on
+    // the token's kid header so tokens signed before a rotation still verify.
+    let verification_keys = db::signing_key::get_all_keys(&conn, &realm_obj.id)?;
     let issuer = format!("{}/realms/{}", state.config.issuer_base_url, realm);
 
-    let claims = jwt::decode_access_token(&bearer, &active_keys, &issuer)
+    let claims = jwt::decode_access_token(&bearer, &verification_keys, &issuer)
         .map_err(|_| AppError::Unauthorized("invalid access token".to_string()))?;
 
     let user = db::user::get_user_by_id(&conn, &claims.sub)?
