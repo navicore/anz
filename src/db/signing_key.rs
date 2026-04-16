@@ -1,4 +1,4 @@
-use crate::models::{SigningAlgorithm, SigningKeyRecord};
+use crate::models::{SigningAlgorithm, SigningKeyInfo, SigningKeyRecord};
 use anyhow::Result;
 use chrono::Utc;
 use rusqlite::{params, Connection, Row};
@@ -53,6 +53,33 @@ pub fn get_signing_keys(conn: &Connection, realm_id: &str) -> Result<Vec<Signing
          FROM signing_keys WHERE realm_id = ?1 AND active = 1 ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map(params![realm_id], parse_signing_key_row)?;
+    let mut keys = Vec::new();
+    for r in rows {
+        keys.push(r?);
+    }
+    Ok(keys)
+}
+
+/// List signing keys (metadata only — no private material) for CLI display.
+/// Returns both active and deactivated keys, newest first.
+pub fn list_keys(conn: &Connection, realm_id: &str) -> Result<Vec<SigningKeyInfo>> {
+    let mut stmt = conn.prepare(
+        "SELECT kid, algorithm, active, created_at
+         FROM signing_keys WHERE realm_id = ?1 ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map(params![realm_id], |row| {
+        let alg_str: String = row.get(1)?;
+        let algorithm = SigningAlgorithm::parse(&alg_str).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(1, rusqlite::types::Type::Text, e.into())
+        })?;
+        let active: i64 = row.get(2)?;
+        Ok(SigningKeyInfo {
+            kid: row.get(0)?,
+            algorithm,
+            active: active != 0,
+            created_at: row.get(3)?,
+        })
+    })?;
     let mut keys = Vec::new();
     for r in rows {
         keys.push(r?);

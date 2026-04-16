@@ -75,6 +75,12 @@ pub enum RealmAction {
         #[arg(long)]
         kid: String,
     },
+    /// List all signing keys in a realm (active and deactivated).
+    ListKeys {
+        /// Realm name
+        #[arg(long)]
+        realm: String,
+    },
 }
 
 pub fn handle(action: RealmAction, conn: &Connection) -> Result<()> {
@@ -153,6 +159,26 @@ pub fn handle(action: RealmAction, conn: &Connection) -> Result<()> {
                 );
             } else {
                 bail!("No signing key with kid '{kid}' in realm '{realm}'");
+            }
+        }
+        RealmAction::ListKeys { realm } => {
+            let realm_obj = db::realm::get_realm_by_name(conn, &realm)?
+                .ok_or_else(|| anyhow::anyhow!("Realm '{realm}' not found"))?;
+            let keys = db::signing_key::list_keys(conn, &realm_obj.id)?;
+            if keys.is_empty() {
+                println!("No signing keys in realm '{realm}'.");
+            } else {
+                println!("{:<8} {:<8} {:<26} KID", "STATUS", "ALG", "CREATED");
+                for k in keys {
+                    let status = if k.active { "active" } else { "inactive" };
+                    println!(
+                        "{:<8} {:<8} {:<26} {}",
+                        status,
+                        k.algorithm.as_jwt_alg(),
+                        k.created_at,
+                        k.kid
+                    );
+                }
             }
         }
     }

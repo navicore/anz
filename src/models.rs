@@ -90,6 +90,16 @@ pub struct SigningKeyRecord {
     pub algorithm: SigningAlgorithm,
 }
 
+/// Metadata-only view of a signing key for listing commands. Excludes private key
+/// material so we never accidentally leak it through CLI output.
+#[derive(Debug, Clone)]
+pub struct SigningKeyInfo {
+    pub kid: String,
+    pub algorithm: SigningAlgorithm,
+    pub active: bool,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub user_id: String,
