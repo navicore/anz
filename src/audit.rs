@@ -16,6 +16,14 @@ pub enum AuditAction {
     PasswordChanged,
     SessionCreated,
     RateLimited,
+    MfaEnrolled,
+    MfaEnrollmentRequired,
+    MfaSuccess,
+    MfaFailure,
+    MfaRecoveryUsed,
+    #[allow(dead_code)] // reserved for future server-side disable endpoint
+    MfaDisabled,
+    MfaRateLimited,
 }
 
 #[derive(Debug, Serialize)]

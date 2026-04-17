@@ -32,23 +32,28 @@ pub fn create_realm(conn: &Connection, name: &str, alg: SigningAlgorithm) -> Res
     Ok(Realm {
         id,
         name: name.to_string(),
+        mfa_required: false,
         created_at: now,
     })
 }
 
-pub fn list_realms(conn: &Connection) -> Result<Vec<Realm>> {
-    let mut stmt = conn.prepare("SELECT id, name, created_at FROM realms ORDER BY name")?;
-    let rows = stmt.query_map([], |row| {
-        let created_str: String = row.get(2)?;
-        let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
+fn parse_realm_row(row: &rusqlite::Row) -> rusqlite::Result<Realm> {
+    let created_str: String = row.get(2)?;
+    let mfa_required: i64 = row.get(3)?;
+    Ok(Realm {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        mfa_required: mfa_required != 0,
+        created_at: chrono::DateTime::parse_from_rfc3339(&created_str)
             .unwrap_or_default()
-            .with_timezone(&Utc);
-        Ok(Realm {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            created_at,
-        })
-    })?;
+            .with_timezone(&Utc),
+    })
+}
+
+pub fn list_realms(conn: &Connection) -> Result<Vec<Realm>> {
+    let mut stmt =
+        conn.prepare("SELECT id, name, created_at, mfa_required FROM realms ORDER BY name")?;
+    let rows = stmt.query_map([], parse_realm_row)?;
     let mut realms = Vec::new();
     for r in rows {
         realms.push(r?);
@@ -57,22 +62,23 @@ pub fn list_realms(conn: &Connection) -> Result<Vec<Realm>> {
 }
 
 pub fn get_realm_by_name(conn: &Connection, name: &str) -> Result<Option<Realm>> {
-    let mut stmt = conn.prepare("SELECT id, name, created_at FROM realms WHERE name = ?1")?;
-    let mut rows = stmt.query_map(params![name], |row| {
-        let created_str: String = row.get(2)?;
-        let created_at = chrono::DateTime::parse_from_rfc3339(&created_str)
-            .unwrap_or_default()
-            .with_timezone(&Utc);
-        Ok(Realm {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            created_at,
-        })
-    })?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, created_at, mfa_required FROM realms WHERE name = ?1")?;
+    let mut rows = stmt.query_map(params![name], parse_realm_row)?;
     match rows.next() {
         Some(r) => Ok(Some(r?)),
         None => Ok(None),
     }
+}
+
+/// Set the MFA-required flag on a realm. When true, users without enrolled MFA are
+/// pushed through an in-line enrollment flow during login.
+pub fn set_mfa_required(conn: &Connection, realm_id: &str, required: bool) -> Result<()> {
+    conn.execute(
+        "UPDATE realms SET mfa_required = ?1 WHERE id = ?2",
+        params![required as i64, realm_id],
+    )?;
+    Ok(())
 }
 
 pub fn delete_realm(conn: &Connection, name: &str) -> Result<bool> {

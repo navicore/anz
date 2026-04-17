@@ -8,7 +8,7 @@ use axum::Form;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
 use rand::RngCore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
@@ -19,7 +19,7 @@ use crate::branding;
 use crate::crypto::{self, csrf, password as pw};
 use crate::db;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AuthorizeQuery {
     pub response_type: String,
     pub client_id: String,
@@ -269,6 +269,31 @@ pub async fn authorize_post(
         detail: None,
     });
 
+    // MFA check: if the user is enrolled, or the realm requires MFA, redirect to
+    // the second step before creating a session or auth code.
+    let user_mfa = db::user_mfa::get(&conn, &user.id)?;
+    if user_mfa.is_some() || realm_obj.mfa_required {
+        let q = AuthorizeQuery {
+            response_type: form.response_type,
+            client_id: form.client_id,
+            redirect_uri: form.redirect_uri,
+            scope: Some(form.scope),
+            state: Some(form.state),
+            code_challenge: Some(form.code_challenge),
+            code_challenge_method: Some(form.code_challenge_method),
+            nonce: form.nonce,
+        };
+        return super::mfa::render_mfa_step(
+            &conn,
+            &state,
+            &realm,
+            &user,
+            user_mfa.as_ref(),
+            realm_obj.mfa_required,
+            q,
+        );
+    }
+
     // Create session
     let session_token = generate_random_token();
     let session_token_hash = crypto::hex_encode(&Sha256::digest(session_token.as_bytes()));
@@ -332,6 +357,19 @@ fn generate_auth_code_redirect(
 ) -> Result<Response, AppError> {
     let (redirect, _) = generate_auth_code_redirect_inner(conn, state, realm_id, q, user_id)?;
     Ok(redirect.into_response())
+}
+
+/// Public entry point for the MFA handler to generate an auth code redirect
+/// after the second factor has been verified.
+pub fn generate_auth_code_redirect_for(
+    conn: &rusqlite::Connection,
+    state: &AppState,
+    realm_id: &str,
+    q: &AuthorizeQuery,
+    user_id: &str,
+) -> Result<Redirect, AppError> {
+    let (redirect, _) = generate_auth_code_redirect_inner(conn, state, realm_id, q, user_id)?;
+    Ok(redirect)
 }
 
 fn generate_auth_code_redirect_inner(

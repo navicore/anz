@@ -16,10 +16,11 @@ a reverse proxy and protect a handful of personal apps.
 - **OIDC authorization code flow** with PKCE
 - **Multi-algorithm signing** — RS256 (default, required by Kubernetes) or EdDSA, per-realm, with concurrent keys during rotation
 - **Argon2id** password hashing
+- **TOTP multi-factor auth** — per-realm enforced or per-user opt-in; recovery codes; in-line enrollment during login
 - **Refresh token rotation** with RFC 7009 revocation
 - **Confidential clients** — optional client_secret for server-side apps (Forgejo, etc.)
 - **Groups claim** — `groups` array in ID tokens and UserInfo for RBAC (Kubernetes, etc.)
-- **Rate limiting** — per-IP login attempt throttling
+- **Rate limiting** — per-IP login + per-user MFA attempt throttling
 - **Audit logging** — JSON-line event log for login, token, and session activity
 - **Per-realm branding** — customizable login page (colors, logo, CSS)
 - **Minimal login UI** — server-rendered HTML, no JavaScript frameworks
@@ -75,8 +76,12 @@ anz realm delete <name>
 anz realm rotate-key --realm <r> --key-type rs256|ed25519
 anz realm deactivate-key --realm <r> --kid <kid>  # stops signing; kid still in JWKS
 anz realm delete-key --realm <r> --kid <kid>      # removes kid from JWKS entirely
+anz realm set-mfa-required --realm <r>            # force MFA for all users
+anz realm set-mfa-required --realm <r> --required false
 anz user add --realm <r> --username <u> --email <e> [--groups admin,dev]
 anz user update-groups --realm <r> --username <u> --groups <g1,g2>
+anz user enroll-mfa --realm <r> --username <u>    # prints QR + recovery codes
+anz user disable-mfa --realm <r> --username <u>   # operator escape hatch
 anz user list --realm <r>
 anz user remove --realm <r> --username <u>
 anz client add --realm <r> --client-id <id> --redirect-uri <uri> [--secret]

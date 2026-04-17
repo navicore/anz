@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct Realm {
     pub id: String,
     pub name: String,
+    pub mfa_required: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -110,4 +111,21 @@ pub struct SessionInfo {
     pub id: String,
     pub created_at: String,
     pub expires_at: String,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // constructed by db::user_mfa and used at runtime
+pub struct UserMfa {
+    pub user_id: String,
+    pub secret_base32: String,
+}
+
+/// Pending second-step authentication state. Created after a successful password
+/// step when MFA is required, consumed when the user submits a valid TOTP or
+/// recovery code. Short-lived (5 minutes) — same hashing pattern as auth codes.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // constructed by db::mfa_challenge and used at runtime
+pub struct MfaChallenge {
+    pub user_id: String,
+    pub authorize_params: String,
 }

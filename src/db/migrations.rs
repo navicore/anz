@@ -91,6 +91,35 @@ pub fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         "TEXT NOT NULL DEFAULT 'EdDSA'",
     )?;
 
+    // MFA support
+    add_column_if_missing(conn, "realms", "mfa_required", "INTEGER NOT NULL DEFAULT 0")?;
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS user_mfa (
+            user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            secret_base32 TEXT NOT NULL,
+            created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS user_mfa_recovery_codes (
+            id         TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            code_hash  TEXT NOT NULL,
+            used       INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            UNIQUE(user_id, code_hash)
+        );
+
+        CREATE TABLE IF NOT EXISTS mfa_challenges (
+            challenge_token_hash TEXT PRIMARY KEY,
+            user_id              TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            authorize_params     TEXT NOT NULL,
+            expires_at           TEXT NOT NULL,
+            created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+        ",
+    )?;
+
     Ok(())
 }
 

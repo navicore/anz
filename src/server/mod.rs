@@ -2,6 +2,7 @@ pub mod authorize;
 pub mod discovery;
 pub mod error;
 pub mod jwks;
+pub mod mfa;
 pub mod password;
 pub mod revoke;
 pub mod static_files;
@@ -25,6 +26,8 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub audit: AuditLogger,
     pub login_attempts: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
+    /// Per-user MFA attempt tracker — keyed by user_id, separate from per-IP login limit.
+    pub mfa_attempts: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
 }
 
 impl AppState {
@@ -60,6 +63,39 @@ impl AppState {
             attempts.entry(ip).or_default().push(Instant::now());
         }
     }
+
+    /// Per-user MFA rate limit — 5 attempts per 5-minute window.
+    /// A 6-digit TOTP code has 1,000,000 possibilities; 5 guesses per window
+    /// renders brute force infeasible within the 30-second TOTP step.
+    pub fn check_mfa_rate_limit(&self, user_id: &str) -> Result<(), u64> {
+        let window = std::time::Duration::from_secs(300);
+        let max: usize = 5;
+        let cutoff = Instant::now() - window;
+
+        let mut attempts = self.mfa_attempts.lock().map_err(|_| 300u64)?;
+        let entry = attempts.entry(user_id.to_string()).or_default();
+        entry.retain(|t| *t > cutoff);
+
+        if entry.len() >= max {
+            let oldest = entry.first().copied().unwrap_or_else(Instant::now);
+            let retry_after = window
+                .checked_sub(oldest.elapsed())
+                .unwrap_or(window)
+                .as_secs();
+            Err(retry_after)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn record_mfa_attempt(&self, user_id: &str) {
+        if let Ok(mut attempts) = self.mfa_attempts.lock() {
+            attempts
+                .entry(user_id.to_string())
+                .or_default()
+                .push(Instant::now());
+        }
+    }
 }
 
 pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Router {
@@ -68,6 +104,7 @@ pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Rou
         config: Arc::new(config),
         audit,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        mfa_attempts: Arc::new(Mutex::new(HashMap::new())),
     };
 
     Router::new()
@@ -84,6 +121,7 @@ pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Rou
         .route("/realms/{realm}/userinfo", get(userinfo::userinfo))
         .route("/realms/{realm}/password", post(password::change_password))
         .route("/realms/{realm}/revoke", post(revoke::revoke))
+        .route("/realms/{realm}/mfa", post(mfa::submit))
         .route(
             "/realms/{realm}/static/{*path}",
             get(static_files::serve_static),
@@ -109,6 +147,7 @@ mod tests {
             config: Arc::new(config),
             audit: AuditLogger::new(false, "/dev/null"),
             login_attempts: Arc::new(Mutex::new(HashMap::new())),
+            mfa_attempts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -144,5 +183,16 @@ mod tests {
         }
         assert!(state.check_login_rate_limit(ip_a).is_err());
         assert!(state.check_login_rate_limit(ip_b).is_ok());
+    }
+
+    #[test]
+    fn mfa_rate_limit_blocks_at_5() {
+        let state = test_state();
+        let uid = "user-1";
+        for _ in 0..5 {
+            state.record_mfa_attempt(uid);
+        }
+        assert!(state.check_mfa_rate_limit(uid).is_err());
+        assert!(state.check_mfa_rate_limit("user-2").is_ok());
     }
 }

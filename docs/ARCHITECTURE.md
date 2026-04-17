@@ -31,9 +31,9 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 | Module | Responsibility |
 |---|---|
 | `cli/` | Parses commands (clap) and dispatches to `serve`, `realm`, `user`, `client`, `session` subcommands |
-| `server/` | Axum router and handlers for all OIDC endpoints: authorize, token, jwks, discovery, userinfo, password, revoke, static_files |
-| `db/` | SQLite schema (7 tables), migrations, and CRUD for realms, users, clients, auth codes, refresh tokens, sessions, signing keys |
-| `crypto/` | Ed25519 key generation/JWK conversion, Argon2id hashing, PKCE S256 verification, CSRF tokens, JWT encoding/decoding |
+| `server/` | Axum router and handlers for all OIDC endpoints: authorize, token, jwks, discovery, userinfo, password, revoke, mfa, static_files |
+| `db/` | SQLite schema (10 tables), migrations, and CRUD for realms, users, clients, auth codes, refresh tokens, sessions, signing keys, user_mfa, mfa_recovery_codes, mfa_challenges |
+| `crypto/` | Ed25519/RSA key generation and JWK conversion, Argon2id hashing, PKCE S256 verification, CSRF tokens, JWT encoding/decoding, TOTP verification |
 | `config.rs` | TOML configuration loading with defaults |
 | `models.rs` | Shared domain types (Realm, User, Client, AuthorizationCode, RefreshToken, Session, SigningKey) |
 | `audit.rs` | JSON-line audit event logging to file |
