@@ -2,6 +2,7 @@ pub mod authorize;
 pub mod discovery;
 pub mod error;
 pub mod jwks;
+pub mod mfa;
 pub mod password;
 pub mod revoke;
 pub mod static_files;
@@ -10,6 +11,7 @@ pub mod userinfo;
 
 use crate::audit::AuditLogger;
 use crate::config::Config;
+use crate::crypto::secret_cipher::SecretCipher;
 use axum::routing::{get, post};
 use axum::Router;
 use rusqlite::Connection;
@@ -25,49 +27,87 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub audit: AuditLogger,
     pub login_attempts: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
+    /// Per-user MFA attempt tracker — keyed by user_id, separate from per-IP login limit.
+    pub mfa_attempts: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
+    /// Encrypts TOTP secrets (stored in `user_mfa` and in pending-enrollment
+    /// challenge blobs). Noop if no key is configured.
+    pub secret_cipher: Arc<SecretCipher>,
+}
+
+/// Atomic "check, prune, evict, record" for a sliding-window rate limiter. Under
+/// a single lock: prune timestamps older than `window`, drop the entry if the
+/// vec empties, reject if already at `max`, otherwise push `now` and return Ok.
+/// Eliminates the TOCTOU window between a separate check and record, and keeps
+/// the map from growing unbounded with stale entries.
+fn consume_slot<K: std::hash::Hash + Eq>(
+    attempts: &Mutex<HashMap<K, Vec<Instant>>>,
+    key: K,
+    window: std::time::Duration,
+    max: usize,
+    fallback_retry_after: u64,
+) -> Result<(), u64> {
+    let mut attempts = attempts.lock().map_err(|_| fallback_retry_after)?;
+    let now = Instant::now();
+    let cutoff = now - window;
+
+    // Sweep the whole map so entries whose window has elapsed without a new
+    // attempt don't accumulate — map stays bounded by concurrent active keys,
+    // not all keys ever seen.
+    attempts.retain(|_, v| {
+        v.retain(|t| *t > cutoff);
+        !v.is_empty()
+    });
+
+    let entry = attempts.entry(key).or_default();
+
+    if entry.len() >= max {
+        let oldest = entry.first().copied().unwrap_or(now);
+        let retry_after = window
+            .checked_sub(oldest.elapsed())
+            .unwrap_or(window)
+            .as_secs();
+        return Err(retry_after);
+    }
+    entry.push(now);
+    Ok(())
 }
 
 impl AppState {
-    /// Check whether the given IP has exceeded the login rate limit.
-    /// Returns Ok(()) if allowed, Err(retry_after_secs) if rate-limited.
-    pub fn check_login_rate_limit(&self, ip: IpAddr) -> Result<(), u64> {
+    /// Atomically consume one login-rate-limit slot for the given IP.
+    /// Returns Ok(()) if the request may proceed, Err(retry_after_secs) if blocked.
+    pub fn consume_login_slot(&self, ip: IpAddr) -> Result<(), u64> {
         let window = std::time::Duration::from_secs(self.config.login_rate_limit_window_secs);
-        let max = self.config.login_rate_limit_max;
-        let cutoff = Instant::now() - window;
-
-        let mut attempts = self
-            .login_attempts
-            .lock()
-            .map_err(|_| self.config.login_rate_limit_window_secs)?;
-
-        let entry = attempts.entry(ip).or_default();
-        entry.retain(|t| *t > cutoff);
-
-        if entry.len() >= max as usize {
-            let oldest = entry.first().copied().unwrap_or_else(Instant::now);
-            let retry_after = window
-                .checked_sub(oldest.elapsed())
-                .unwrap_or(window)
-                .as_secs();
-            Err(retry_after)
-        } else {
-            Ok(())
-        }
+        consume_slot(
+            &self.login_attempts,
+            ip,
+            window,
+            self.config.login_rate_limit_max as usize,
+            self.config.login_rate_limit_window_secs,
+        )
     }
 
-    pub fn record_login_attempt(&self, ip: IpAddr) {
-        if let Ok(mut attempts) = self.login_attempts.lock() {
-            attempts.entry(ip).or_default().push(Instant::now());
-        }
+    /// Atomically consume one MFA-rate-limit slot for the given user. 5 attempts
+    /// per 5-minute window — a 6-digit TOTP code has 1M possibilities; 5 guesses
+    /// per window makes brute force infeasible within the 30-second TOTP step.
+    pub fn consume_mfa_slot(&self, user_id: &str) -> Result<(), u64> {
+        let window = std::time::Duration::from_secs(300);
+        consume_slot(&self.mfa_attempts, user_id.to_string(), window, 5, 300)
     }
 }
 
-pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Router {
+pub fn build_router(
+    config: Config,
+    conn: Connection,
+    audit: AuditLogger,
+    secret_cipher: Arc<SecretCipher>,
+) -> Router {
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
         config: Arc::new(config),
         audit,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
+        mfa_attempts: Arc::new(Mutex::new(HashMap::new())),
+        secret_cipher,
     };
 
     Router::new()
@@ -84,6 +124,7 @@ pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Rou
         .route("/realms/{realm}/userinfo", get(userinfo::userinfo))
         .route("/realms/{realm}/password", post(password::change_password))
         .route("/realms/{realm}/revoke", post(revoke::revoke))
+        .route("/realms/{realm}/mfa", post(mfa::submit))
         .route(
             "/realms/{realm}/static/{*path}",
             get(static_files::serve_static),
@@ -109,6 +150,8 @@ mod tests {
             config: Arc::new(config),
             audit: AuditLogger::new(false, "/dev/null"),
             login_attempts: Arc::new(Mutex::new(HashMap::new())),
+            mfa_attempts: Arc::new(Mutex::new(HashMap::new())),
+            secret_cipher: Arc::new(SecretCipher::noop()),
         }
     }
 
@@ -117,9 +160,10 @@ mod tests {
         let state = test_state();
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
 
-        state.record_login_attempt(ip);
-        state.record_login_attempt(ip);
-        assert!(state.check_login_rate_limit(ip).is_ok());
+        assert!(state.consume_login_slot(ip).is_ok());
+        assert!(state.consume_login_slot(ip).is_ok());
+        // A third call still succeeds — max is 3.
+        assert!(state.consume_login_slot(ip).is_ok());
     }
 
     #[test]
@@ -128,9 +172,9 @@ mod tests {
         let ip: IpAddr = "10.0.0.2".parse().unwrap();
 
         for _ in 0..3 {
-            state.record_login_attempt(ip);
+            assert!(state.consume_login_slot(ip).is_ok());
         }
-        assert!(state.check_login_rate_limit(ip).is_err());
+        assert!(state.consume_login_slot(ip).is_err());
     }
 
     #[test]
@@ -140,9 +184,19 @@ mod tests {
         let ip_b: IpAddr = "10.0.0.4".parse().unwrap();
 
         for _ in 0..3 {
-            state.record_login_attempt(ip_a);
+            assert!(state.consume_login_slot(ip_a).is_ok());
         }
-        assert!(state.check_login_rate_limit(ip_a).is_err());
-        assert!(state.check_login_rate_limit(ip_b).is_ok());
+        assert!(state.consume_login_slot(ip_a).is_err());
+        assert!(state.consume_login_slot(ip_b).is_ok());
+    }
+
+    #[test]
+    fn mfa_rate_limit_blocks_at_5() {
+        let state = test_state();
+        for _ in 0..5 {
+            assert!(state.consume_mfa_slot("user-1").is_ok());
+        }
+        assert!(state.consume_mfa_slot("user-1").is_err());
+        assert!(state.consume_mfa_slot("user-2").is_ok());
     }
 }

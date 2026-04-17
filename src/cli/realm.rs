@@ -81,6 +81,16 @@ pub enum RealmAction {
         #[arg(long)]
         realm: String,
     },
+    /// Toggle whether the realm requires MFA. When required, users without MFA
+    /// enrolled are routed through an in-line enrollment page during login.
+    SetMfaRequired {
+        /// Realm name
+        #[arg(long)]
+        realm: String,
+        /// Set the requirement on or off
+        #[arg(long, default_value_t = true)]
+        required: bool,
+    },
 }
 
 pub fn handle(action: RealmAction, conn: &Connection) -> Result<()> {
@@ -179,6 +189,20 @@ pub fn handle(action: RealmAction, conn: &Connection) -> Result<()> {
                         k.kid
                     );
                 }
+            }
+        }
+        RealmAction::SetMfaRequired { realm, required } => {
+            let realm_obj = db::realm::get_realm_by_name(conn, &realm)?
+                .ok_or_else(|| anyhow::anyhow!("Realm '{realm}' not found"))?;
+            db::realm::set_mfa_required(conn, &realm_obj.id, required)?;
+            if required {
+                println!("MFA is now REQUIRED for realm '{realm}'.");
+                println!(
+                    "  Users without MFA will be sent through enrollment on their next login."
+                );
+            } else {
+                println!("MFA requirement disabled for realm '{realm}'.");
+                println!("  Existing user enrollments are unchanged.");
             }
         }
     }

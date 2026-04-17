@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up two-factor — {{ realm_name }}</title>
+  <style>
+    :root {
+      --primary: {{ branding_primary_color }};
+      --bg: {{ branding_background_color }};
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 2rem 1rem; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); padding: 2rem; width: 100%; max-width: 480px; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; color: #333; }
+    h2 { font-size: 1rem; margin: 1.5rem 0 0.5rem; color: #444; }
+    .subtitle { font-size: 0.9rem; color: #666; margin-bottom: 1rem; }
+    .realm { font-size: 0.85rem; color: #888; margin-bottom: 1rem; }
+    .qr { display: flex; justify-content: center; padding: 1rem; background: #fafafa; border-radius: 4px; margin: 0.5rem 0; }
+    .qr svg { max-width: 100%; height: auto; }
+    .secret { font-family: monospace; font-size: 0.95rem; padding: 0.5rem; background: #f3f4f6; border-radius: 4px; word-break: break-all; user-select: all; }
+    label { display: block; margin: 1rem 0 0.3rem; font-size: 0.9rem; color: #555; }
+    input[type="text"] { width: 100%; padding: 0.6rem; border: 1px solid #ccc; border-radius: 4px; font-size: 1.2rem; letter-spacing: 0.2rem; text-align: center; font-family: monospace; }
+    button { width: 100%; padding: 0.7rem; background: var(--primary); color: #fff; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
+    button:hover { opacity: 0.9; }
+    .error { color: #dc2626; font-size: 0.9rem; margin-bottom: 1rem; text-align: center; }
+    .recovery { font-family: monospace; font-size: 0.9rem; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 4px; padding: 0.75rem; margin-top: 0.5rem; }
+    .recovery ul { list-style: none; columns: 2; }
+    .recovery li { padding: 0.15rem 0; }
+    .warn { font-size: 0.85rem; color: #92400e; margin-top: 0.5rem; }
+  </style>
+  {% match branding_custom_css %}
+  {% when Some with (css) %}
+  <style>{{ css }}</style>
+  {% when None %}
+  {% endmatch %}
+</head>
+<body>
+  <div class="card">
+    <h1>Set up two-factor authentication</h1>
+    <div class="subtitle">This realm requires MFA. Add anz to your authenticator app, then enter a code to confirm.</div>
+    <div class="realm">{{ realm_name }}</div>
+    {% match error_message %}
+    {% when Some with (err) %}
+    <div class="error">{{ err }}</div>
+    {% when None %}
+    {% endmatch %}
+
+    <h2>Scan with your authenticator app</h2>
+    <div class="qr">{{ qr_svg|safe }}</div>
+
+    <h2>Or enter the secret manually</h2>
+    <div class="secret">{{ secret }}</div>
+
+    <h2>Save your recovery codes</h2>
+    {% if recovery_codes.is_empty() %}
+    <div class="recovery">
+      Recovery codes are shown once, on the previous page. If you didn't save them,
+      cancel and ask an operator to re-enroll you.
+    </div>
+    {% else %}
+    <div class="recovery">
+      <ul>
+        {% for code in recovery_codes %}
+        <li>{{ code }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="warn">Each code works once. Store them somewhere safe — they won't be shown again.</div>
+    {% endif %}
+
+    <form method="post" action="/realms/{{ realm_name }}/mfa">
+      <input type="hidden" name="challenge_token" value="{{ challenge_token }}">
+      <label for="code">Confirm with a code from your authenticator</label>
+      <input type="text" id="code" name="code" required autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" autofocus>
+      <button type="submit">Finish setup</button>
+    </form>
+  </div>
+</body>
+</html>

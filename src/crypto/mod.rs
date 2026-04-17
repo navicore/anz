@@ -2,7 +2,10 @@ pub mod csrf;
 pub mod keys;
 pub mod password;
 pub mod pkce;
+pub mod secret_cipher;
 pub mod token;
+pub mod tokens;
+pub mod totp;
 
 pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

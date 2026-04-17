@@ -18,6 +18,16 @@ password-hash = "0.5"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
 rsa = { version = "0.9", features = ["pem", "sha2"] }
+# TOTP (RFC 6238) for MFA. The crate has built-in QR generation as a feature
+# but we use the separate `qrcode` crate so we control rendering (terminal ASCII).
+totp-rs = { version = "5", features = ["gen_secret"] }
+base32 = "0.5"
+# AES-256-GCM for encrypting TOTP secrets at rest. Key comes from config or
+# ANZ_MFA_SECRET_KEY env var; absent key falls back to plaintext with a warning.
+aes-gcm = "0.10"
+# Text-only QR rendering — disable default features to avoid pulling in `image`
+# and the rest of the graphics stack.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 rand = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

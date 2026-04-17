@@ -42,6 +42,19 @@ pub struct Config {
 
     #[serde(default = "default_realms_dir")]
     pub realms_dir: String,
+
+    /// 32-byte AES-256-GCM key (64 hex chars) for encrypting TOTP secrets at
+    /// rest. `ANZ_MFA_SECRET_KEY` env var takes precedence. Absent → warning at
+    /// startup and plaintext storage for backward compatibility.
+    #[serde(default)]
+    pub mfa_secret_key_hex: Option<String>,
+
+    /// Append `Secure` to session and CSRF cookies so browsers only send them
+    /// over HTTPS. Default true (auth server) — set false for plain-HTTP local
+    /// dev, where browsers otherwise silently refuse to return the cookie and
+    /// login appears to loop.
+    #[serde(default = "default_secure_cookies")]
+    pub secure_cookies: bool,
 }
 
 fn default_bind_address() -> String {
@@ -83,8 +96,21 @@ fn default_login_rate_limit_window_secs() -> u64 {
 fn default_realms_dir() -> String {
     "realms".to_string()
 }
+fn default_secure_cookies() -> bool {
+    true
+}
 
 impl Config {
+    /// Suffix to splice into `Set-Cookie` headers: either `"; Secure"` (prod /
+    /// HTTPS) or `""` (local HTTP dev). Keeps all cookie build sites uniform.
+    pub fn cookie_secure_attr(&self) -> &'static str {
+        if self.secure_cookies {
+            "; Secure"
+        } else {
+            ""
+        }
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let contents =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -123,6 +149,8 @@ impl Default for Config {
             login_rate_limit_max: default_login_rate_limit_max(),
             login_rate_limit_window_secs: default_login_rate_limit_window_secs(),
             realms_dir: default_realms_dir(),
+            mfa_secret_key_hex: None,
+            secure_cookies: default_secure_cookies(),
         }
     }
 }

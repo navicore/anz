@@ -8,7 +8,7 @@ use axum::Form;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
 use rand::RngCore;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 
@@ -19,7 +19,7 @@ use crate::branding;
 use crate::crypto::{self, csrf, password as pw};
 use crate::db;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct AuthorizeQuery {
     pub response_type: String,
     pub client_id: String,
@@ -127,8 +127,10 @@ pub async fn authorize_get(
 
     // No session — show login form
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie =
-        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
+    let secure = state.config.cookie_secure_attr();
+    let csrf_cookie = format!(
+        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}{secure}"
+    );
 
     let realm_branding = branding::load_branding(&state.config.realms_dir, &realm);
     let logo_url = realm_branding.logo_url(&realm);
@@ -202,8 +204,8 @@ pub async fn authorize_post(
         return render_login_error(&state, &realm, &form, "Invalid request. Please try again.");
     }
 
-    // Check rate limit after CSRF passes
-    if let Err(retry_after) = state.check_login_rate_limit(ip) {
+    // Rate limit (check + record atomically)
+    if let Err(retry_after) = state.consume_login_slot(ip) {
         let detail = format!("retry_after={retry_after}s");
         state.audit.log_event(LogEventParams {
             realm: &realm,
@@ -218,9 +220,6 @@ pub async fn authorize_post(
             "Too many login attempts. Retry after {retry_after} seconds."
         )));
     }
-
-    // Record the attempt
-    state.record_login_attempt(ip);
 
     // Validate client and redirect_uri
     let client = db::client::get_client_by_client_id(&conn, &realm_obj.id, &form.client_id)?
@@ -269,6 +268,31 @@ pub async fn authorize_post(
         detail: None,
     });
 
+    // MFA check: if the user is enrolled, or the realm requires MFA, redirect to
+    // the second step before creating a session or auth code.
+    let user_mfa = db::user_mfa::get(&conn, &user.id)?;
+    if user_mfa.is_some() || realm_obj.mfa_required {
+        let q = AuthorizeQuery {
+            response_type: form.response_type,
+            client_id: form.client_id,
+            redirect_uri: form.redirect_uri,
+            scope: Some(form.scope),
+            state: Some(form.state),
+            code_challenge: Some(form.code_challenge),
+            code_challenge_method: Some(form.code_challenge_method),
+            nonce: form.nonce,
+        };
+        return super::mfa::render_mfa_step(
+            &conn,
+            &state,
+            &realm,
+            &user,
+            user_mfa.as_ref(),
+            realm_obj.mfa_required,
+            q,
+        );
+    }
+
     // Create session
     let session_token = generate_random_token();
     let session_token_hash = crypto::hex_encode(&Sha256::digest(session_token.as_bytes()));
@@ -292,8 +316,9 @@ pub async fn authorize_post(
         detail: None,
     });
 
+    let secure = state.config.cookie_secure_attr();
     let session_cookie = format!(
-        "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}",
+        "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}{secure}",
         state.config.session_lifetime_secs
     );
 
@@ -313,8 +338,9 @@ pub async fn authorize_post(
         generate_auth_code_redirect_inner(&conn, &state, &realm_obj.id, &q, &user.id)?;
 
     // Clear CSRF cookie, set session cookie
-    let clear_csrf =
-        format!("anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0");
+    let clear_csrf = format!(
+        "anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0{secure}"
+    );
 
     Ok((
         [(SET_COOKIE, session_cookie), (SET_COOKIE, clear_csrf)],
@@ -332,6 +358,19 @@ fn generate_auth_code_redirect(
 ) -> Result<Response, AppError> {
     let (redirect, _) = generate_auth_code_redirect_inner(conn, state, realm_id, q, user_id)?;
     Ok(redirect.into_response())
+}
+
+/// Public entry point for the MFA handler to generate an auth code redirect
+/// after the second factor has been verified.
+pub fn generate_auth_code_redirect_for(
+    conn: &rusqlite::Connection,
+    state: &AppState,
+    realm_id: &str,
+    q: &AuthorizeQuery,
+    user_id: &str,
+) -> Result<Redirect, AppError> {
+    let (redirect, _) = generate_auth_code_redirect_inner(conn, state, realm_id, q, user_id)?;
+    Ok(redirect)
 }
 
 fn generate_auth_code_redirect_inner(
@@ -381,8 +420,10 @@ fn render_login_error(
     error_msg: &str,
 ) -> Result<Response, AppError> {
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie =
-        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
+    let secure = state.config.cookie_secure_attr();
+    let csrf_cookie = format!(
+        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}{secure}"
+    );
 
     let realm_branding = branding::load_branding(&state.config.realms_dir, realm);
     let logo_url = realm_branding.logo_url(realm);

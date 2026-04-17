@@ -16,6 +16,13 @@ pub enum AuditAction {
     PasswordChanged,
     SessionCreated,
     RateLimited,
+    MfaEnrolled,
+    MfaEnrollmentRequired,
+    MfaSuccess,
+    MfaFailure,
+    MfaRecoveryUsed,
+    MfaDisabled,
+    MfaRateLimited,
 }
 
 #[derive(Debug, Serialize)]
