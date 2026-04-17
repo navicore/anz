@@ -15,10 +15,6 @@
 //! plaintext unchanged and `decrypt` accepts only legacy plaintext (a ciphertext
 //! value with no key to decrypt it is a hard error — the secret is lost).
 
-// `Nonce::from_slice` warns about the generic-array 0.x → 1.x migration that
-// aes-gcm hasn't completed yet. Suppress here; the call is still correct.
-#![allow(deprecated)]
-
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, Result};
@@ -68,6 +64,9 @@ impl SecretCipher {
         };
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::rng().fill_bytes(&mut nonce_bytes);
+        // Deprecation is from aes-gcm's pending generic-array 1.x migration —
+        // the call itself is correct.
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ct = cipher
             .encrypt(nonce, plaintext.as_bytes())
@@ -96,6 +95,7 @@ impl SecretCipher {
             return Err(anyhow!("encrypted secret too short"));
         }
         let (nonce_bytes, ct) = raw.split_at(NONCE_LEN);
+        #[allow(deprecated)]
         let nonce = Nonce::from_slice(nonce_bytes);
         let pt = cipher.decrypt(nonce, ct).map_err(|e| {
             anyhow!("aes-gcm decrypt failed (wrong key or corrupt ciphertext): {e}")

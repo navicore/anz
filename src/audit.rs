@@ -21,7 +21,6 @@ pub enum AuditAction {
     MfaSuccess,
     MfaFailure,
     MfaRecoveryUsed,
-    #[allow(dead_code)] // reserved for future server-side disable endpoint
     MfaDisabled,
     MfaRateLimited,
 }

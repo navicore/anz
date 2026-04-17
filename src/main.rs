@@ -8,6 +8,7 @@ mod models;
 mod server;
 
 use anyhow::Result;
+use audit::AuditLogger;
 use clap::Parser;
 use std::path::Path;
 use std::sync::Arc;
@@ -40,12 +41,14 @@ fn main() -> Result<()> {
         );
     }
 
+    let audit = AuditLogger::new(config.audit_log_enabled, &config.audit_log_path);
+
     match cli.command {
         cli::Commands::Realm { action } => cli::realm::handle(action, &conn)?,
-        cli::Commands::User { action } => cli::user::handle(action, &conn, &cipher)?,
+        cli::Commands::User { action } => cli::user::handle(action, &conn, &cipher, &audit)?,
         cli::Commands::Client { action } => cli::client::handle(action, &conn)?,
         cli::Commands::Session { action } => cli::session::handle(action, &conn)?,
-        cli::Commands::Serve => cli::serve::run(config, conn, cipher)?,
+        cli::Commands::Serve => cli::serve::run(config, conn, cipher, audit)?,
     }
 
     Ok(())

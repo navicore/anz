@@ -9,11 +9,15 @@ use crate::config::Config;
 use crate::crypto::secret_cipher::SecretCipher;
 use crate::server;
 
-pub fn run(config: Config, conn: Connection, secret_cipher: Arc<SecretCipher>) -> Result<()> {
+pub fn run(
+    config: Config,
+    conn: Connection,
+    secret_cipher: Arc<SecretCipher>,
+    audit: AuditLogger,
+) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let addr = config.bind_address.clone();
-        let audit = AuditLogger::new(config.audit_log_enabled, &config.audit_log_path);
         let app = server::build_router(config, conn, audit, secret_cipher);
 
         tracing::info!("Listening on {addr}");

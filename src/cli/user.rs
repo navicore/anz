@@ -6,6 +6,7 @@ use qrcode::render::unicode::Dense1x2;
 use qrcode::QrCode;
 use rusqlite::Connection;
 
+use crate::audit::{AuditAction, AuditLogger, LogEventParams};
 use crate::crypto::password::hash_password;
 use crate::crypto::secret_cipher::SecretCipher;
 use crate::crypto::tokens::generate_recovery_codes;
@@ -80,7 +81,12 @@ pub enum UserAction {
     },
 }
 
-pub fn handle(action: UserAction, conn: &Connection, cipher: &SecretCipher) -> Result<()> {
+pub fn handle(
+    action: UserAction,
+    conn: &Connection,
+    cipher: &SecretCipher,
+    audit: &AuditLogger,
+) -> Result<()> {
     match action {
         UserAction::Add {
             realm,
@@ -223,6 +229,15 @@ pub fn handle(action: UserAction, conn: &Connection, cipher: &SecretCipher) -> R
                 .ok_or_else(|| anyhow::anyhow!("User '{username}' not found in realm '{realm}'"))?;
 
             if db::user_mfa::disable(conn, &user.id)? {
+                audit.log_event(LogEventParams {
+                    realm: &realm,
+                    action: AuditAction::MfaDisabled,
+                    user_id: Some(&user.id),
+                    client_id: None,
+                    ip: None,
+                    success: true,
+                    detail: Some("source=cli"),
+                });
                 println!("Disabled MFA for '{username}' in realm '{realm}'");
             } else {
                 println!("User '{username}' did not have MFA enabled");

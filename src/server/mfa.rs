@@ -9,7 +9,6 @@ use askama::Template;
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::{Path, State};
 use axum::http::header::SET_COOKIE;
-use axum::http::HeaderMap;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
 use chrono::{Duration, Utc};
@@ -41,7 +40,11 @@ pub struct ChallengeState {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingEnrollment {
-    pub secret_b32: String,
+    /// Encrypted (or pass-through) TOTP secret as it will be persisted. Ciphertext
+    /// when the server has a configured `SecretCipher` key, raw base32 otherwise.
+    /// Callers must decrypt via `AppState.secret_cipher` before passing to
+    /// `totp::*` helpers or displaying in the enrollment template.
+    pub secret_stored: String,
     pub recovery_code_hashes: Vec<String>,
 }
 
@@ -144,7 +147,7 @@ pub fn render_mfa_step(
         let challenge_state = ChallengeState {
             authorize,
             pending_enrollment: Some(PendingEnrollment {
-                secret_b32: stored_secret,
+                secret_stored: stored_secret,
                 recovery_code_hashes: recovery_hashes,
             }),
         };
@@ -205,7 +208,6 @@ pub async fn submit(
     State(state): State<AppState>,
     Path(realm): Path<String>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    _headers: HeaderMap,
     Form(form): Form<MfaForm>,
 ) -> Result<Response, AppError> {
     let ip = addr.ip();
@@ -283,7 +285,7 @@ pub async fn submit(
         db::user_mfa::enroll(
             &conn,
             &user.id,
-            &pending.secret_b32,
+            &pending.secret_stored,
             &pending.recovery_code_hashes,
         )?;
         // Seed last_used_step with the step the confirmation code matched, so
@@ -374,12 +376,15 @@ fn verify_code(
     pending: Option<&PendingEnrollment>,
 ) -> Result<CodeVerification, AppError> {
     // 1. Pending enrollment: only TOTP is checked (no recovery codes yet — the
-    //    user hasn't confirmed they have any). No replay check: there's no
-    //    user_mfa row to compare against; caller will seed last_used_step on
-    //    enroll commit so the same code can't be replayed afterward.
+    //    user hasn't confirmed they have any). No replay check here: there's no
+    //    user_mfa row yet, so `advance_step` is deliberately deferred to the
+    //    caller (`submit`), which runs it right after `enroll()` to seed
+    //    last_used_step and block replay of the confirmation code. The
+    //    already-enrolled branch below calls `advance_step` inline — that
+    //    asymmetry is intentional.
     if let Some(p) = pending {
         let plaintext = cipher
-            .decrypt(&p.secret_b32)
+            .decrypt(&p.secret_stored)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         let matched = totp::verify_code(&plaintext, submitted_code)
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -433,7 +438,7 @@ fn rerender_with_error(
     let html = if let Some(pending) = &challenge_state.pending_enrollment {
         let secret_plain = state
             .secret_cipher
-            .decrypt(&pending.secret_b32)
+            .decrypt(&pending.secret_stored)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         let issuer = format!("anz ({realm})");
         let uri = totp::build_otpauth_uri(&issuer, &user.username, &secret_plain);
