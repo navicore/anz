@@ -344,8 +344,9 @@ pub async fn submit(
         detail: None,
     });
 
+    let secure = state.config.cookie_secure_attr();
     let session_cookie = format!(
-        "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}",
+        "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}{secure}",
         state.config.session_lifetime_secs
     );
 

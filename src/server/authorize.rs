@@ -127,8 +127,10 @@ pub async fn authorize_get(
 
     // No session — show login form
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie =
-        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
+    let secure = state.config.cookie_secure_attr();
+    let csrf_cookie = format!(
+        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}{secure}"
+    );
 
     let realm_branding = branding::load_branding(&state.config.realms_dir, &realm);
     let logo_url = realm_branding.logo_url(&realm);
@@ -314,8 +316,9 @@ pub async fn authorize_post(
         detail: None,
     });
 
+    let secure = state.config.cookie_secure_attr();
     let session_cookie = format!(
-        "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}",
+        "anz_session_{realm}={session_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age={}{secure}",
         state.config.session_lifetime_secs
     );
 
@@ -335,8 +338,9 @@ pub async fn authorize_post(
         generate_auth_code_redirect_inner(&conn, &state, &realm_obj.id, &q, &user.id)?;
 
     // Clear CSRF cookie, set session cookie
-    let clear_csrf =
-        format!("anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0");
+    let clear_csrf = format!(
+        "anz_csrf_{realm}=; HttpOnly; SameSite=Lax; Path=/realms/{realm}; Max-Age=0{secure}"
+    );
 
     Ok((
         [(SET_COOKIE, session_cookie), (SET_COOKIE, clear_csrf)],
@@ -416,8 +420,10 @@ fn render_login_error(
     error_msg: &str,
 ) -> Result<Response, AppError> {
     let csrf_token = csrf::generate_csrf_token();
-    let csrf_cookie =
-        format!("anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}");
+    let secure = state.config.cookie_secure_attr();
+    let csrf_cookie = format!(
+        "anz_csrf_{realm}={csrf_token}; HttpOnly; SameSite=Lax; Path=/realms/{realm}{secure}"
+    );
 
     let realm_branding = branding::load_branding(&state.config.realms_dir, realm);
     let logo_url = realm_branding.logo_url(realm);
