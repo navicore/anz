@@ -53,6 +53,12 @@
     <div class="secret">{{ secret }}</div>
 
     <h2>Save your recovery codes</h2>
+    {% if recovery_codes.is_empty() %}
+    <div class="recovery">
+      Recovery codes are shown once, on the previous page. If you didn't save them,
+      cancel and ask an operator to re-enroll you.
+    </div>
+    {% else %}
     <div class="recovery">
       <ul>
         {% for code in recovery_codes %}
@@ -61,6 +67,7 @@
       </ul>
     </div>
     <div class="warn">Each code works once. Store them somewhere safe — they won't be shown again.</div>
+    {% endif %}
 
     <form method="post" action="/realms/{{ realm_name }}/mfa">
       <input type="hidden" name="challenge_token" value="{{ challenge_token }}">

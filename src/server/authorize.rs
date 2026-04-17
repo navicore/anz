@@ -202,8 +202,8 @@ pub async fn authorize_post(
         return render_login_error(&state, &realm, &form, "Invalid request. Please try again.");
     }
 
-    // Check rate limit after CSRF passes
-    if let Err(retry_after) = state.check_login_rate_limit(ip) {
+    // Rate limit (check + record atomically)
+    if let Err(retry_after) = state.consume_login_slot(ip) {
         let detail = format!("retry_after={retry_after}s");
         state.audit.log_event(LogEventParams {
             realm: &realm,
@@ -218,9 +218,6 @@ pub async fn authorize_post(
             "Too many login attempts. Retry after {retry_after} seconds."
         )));
     }
-
-    // Record the attempt
-    state.record_login_attempt(ip);
 
     // Validate client and redirect_uri
     let client = db::client::get_client_by_client_id(&conn, &realm_obj.id, &form.client_id)?

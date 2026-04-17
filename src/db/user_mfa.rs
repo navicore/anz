@@ -18,13 +18,31 @@ pub fn enroll(
     secret_base32: &str,
     recovery_code_hashes: &[String],
 ) -> Result<()> {
-    // Replace any prior enrollment.
+    conn.execute_batch("BEGIN")?;
+    let result = enroll_inner(conn, user_id, secret_base32, recovery_code_hashes);
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+fn enroll_inner(
+    conn: &Connection,
+    user_id: &str,
+    secret_base32: &str,
+    recovery_code_hashes: &[String],
+) -> Result<()> {
     conn.execute("DELETE FROM user_mfa WHERE user_id = ?1", params![user_id])?;
     conn.execute(
         "DELETE FROM user_mfa_recovery_codes WHERE user_id = ?1",
         params![user_id],
     )?;
-
     conn.execute(
         "INSERT INTO user_mfa (user_id, secret_base32) VALUES (?1, ?2)",
         params![user_id, secret_base32],
@@ -55,12 +73,25 @@ pub fn get(conn: &Connection, user_id: &str) -> Result<Option<UserMfa>> {
 
 /// Disable MFA for a user — purges the secret and all recovery codes.
 pub fn disable(conn: &Connection, user_id: &str) -> Result<bool> {
-    let mfa_rows = conn.execute("DELETE FROM user_mfa WHERE user_id = ?1", params![user_id])?;
-    conn.execute(
-        "DELETE FROM user_mfa_recovery_codes WHERE user_id = ?1",
-        params![user_id],
-    )?;
-    Ok(mfa_rows > 0)
+    conn.execute_batch("BEGIN")?;
+    let result: Result<bool> = (|| {
+        let mfa_rows = conn.execute("DELETE FROM user_mfa WHERE user_id = ?1", params![user_id])?;
+        conn.execute(
+            "DELETE FROM user_mfa_recovery_codes WHERE user_id = ?1",
+            params![user_id],
+        )?;
+        Ok(mfa_rows > 0)
+    })();
+    match result {
+        Ok(v) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }
 
 /// Try to consume a recovery code by its hash. Returns true if a matching

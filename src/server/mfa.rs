@@ -44,9 +44,6 @@ pub struct ChallengeState {
 pub struct PendingEnrollment {
     pub secret_b32: String,
     pub recovery_code_hashes: Vec<String>,
-    /// Plaintext recovery codes — only kept long enough to display on the
-    /// enrollment page. Cleared once user confirms a code.
-    pub recovery_code_plain: Vec<String>,
 }
 
 const CHALLENGE_TTL_SECS: i64 = 300;
@@ -72,6 +69,9 @@ struct EnrollTemplate {
     challenge_token: String,
     secret: String,
     qr_svg: String,
+    /// Plaintext recovery codes — only populated on the initial enrollment
+    /// render, never persisted. Empty on re-renders after a bad confirmation
+    /// code; the template shows a "save them from the previous page" hint.
     recovery_codes: Vec<String>,
     error_message: Option<String>,
     branding_title: String,
@@ -140,7 +140,6 @@ pub fn render_mfa_step(
             pending_enrollment: Some(PendingEnrollment {
                 secret_b32: secret_b32.clone(),
                 recovery_code_hashes: recovery_hashes,
-                recovery_code_plain: recovery_plain.clone(),
             }),
         };
 
@@ -185,6 +184,10 @@ pub fn render_mfa_step(
     Ok(Html(response_html).into_response())
 }
 
+/// CSRF for the MFA form is implicit: the `challenge_token` here is random,
+/// unguessable, looked up by SHA-256 hash in the DB, and scoped to a single
+/// server-issued challenge. Possession of it proves the client came through
+/// our challenge render — functionally the same as a double-submit cookie.
 #[derive(Debug, Deserialize)]
 pub struct MfaForm {
     pub challenge_token: String,
@@ -215,8 +218,9 @@ pub async fn submit(
     let user = db::user::get_user_by_id(&conn, &challenge.user_id)?
         .ok_or_else(|| AppError::Internal("user not found".to_string()))?;
 
-    // Per-user TOTP rate limit (separate from the per-IP login limit).
-    if let Err(retry_after) = state.check_mfa_rate_limit(&user.id) {
+    // Per-user TOTP rate limit (separate from the per-IP login limit). Atomic
+    // check+record — every attempt consumes a slot regardless of outcome.
+    if let Err(retry_after) = state.consume_mfa_slot(&user.id) {
         state.audit.log_event(LogEventParams {
             realm: &realm,
             action: AuditAction::MfaRateLimited,
@@ -245,7 +249,6 @@ pub async fn submit(
     )?;
 
     if !verification.success {
-        state.record_mfa_attempt(&user.id);
         state.audit.log_event(LogEventParams {
             realm: &realm,
             action: AuditAction::MfaFailure,
@@ -392,7 +395,7 @@ fn rerender_with_error(
     _conn: &rusqlite::Connection,
     state: &AppState,
     realm: &str,
-    _user: &User,
+    user: &User,
     challenge_token: &str,
     challenge_state: &ChallengeState,
     error: &str,
@@ -401,7 +404,7 @@ fn rerender_with_error(
 
     let html = if let Some(pending) = &challenge_state.pending_enrollment {
         let issuer = format!("anz ({realm})");
-        let uri = totp::build_otpauth_uri(&issuer, "user", &pending.secret_b32);
+        let uri = totp::build_otpauth_uri(&issuer, &user.username, &pending.secret_b32);
         let qr_svg = QrCode::new(uri.as_bytes())
             .map_err(|e| AppError::Internal(format!("qr code: {e}")))?
             .render::<svg::Color<'_>>()
@@ -412,7 +415,10 @@ fn rerender_with_error(
             challenge_token: challenge_token.to_string(),
             secret: pending.secret_b32.clone(),
             qr_svg,
-            recovery_codes: pending.recovery_code_plain.clone(),
+            // Recovery codes were only shown on the initial render; we never
+            // persist the plaintext, so the retry template shows a hint to
+            // save them from the previous page.
+            recovery_codes: Vec::new(),
             error_message: Some(error.to_string()),
             branding_title: realm_branding.title,
             branding_primary_color: realm_branding.primary_color,
