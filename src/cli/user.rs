@@ -7,6 +7,7 @@ use qrcode::QrCode;
 use rusqlite::Connection;
 
 use crate::crypto::password::hash_password;
+use crate::crypto::secret_cipher::SecretCipher;
 use crate::crypto::tokens::generate_recovery_codes;
 use crate::crypto::totp;
 use crate::db;
@@ -79,7 +80,7 @@ pub enum UserAction {
     },
 }
 
-pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
+pub fn handle(action: UserAction, conn: &Connection, cipher: &SecretCipher) -> Result<()> {
     match action {
         UserAction::Add {
             realm,
@@ -186,7 +187,8 @@ pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
 
             // Show plaintext to the user once; persist hashes.
             let (recovery_plain, recovery_hashes) = generate_recovery_codes(10);
-            db::user_mfa::enroll(conn, &user.id, &secret_b32, &recovery_hashes)?;
+            let stored_secret = cipher.encrypt(&secret_b32)?;
+            db::user_mfa::enroll(conn, &user.id, &stored_secret, &recovery_hashes)?;
 
             // Render QR to terminal (Unicode half-block — compact and scannable).
             let qr = QrCode::new(uri.as_bytes())?;

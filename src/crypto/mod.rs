@@ -2,6 +2,7 @@ pub mod csrf;
 pub mod keys;
 pub mod password;
 pub mod pkce;
+pub mod secret_cipher;
 pub mod token;
 pub mod tokens;
 pub mod totp;

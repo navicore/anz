@@ -22,6 +22,9 @@ rsa = { version = "0.9", features = ["pem", "sha2"] }
 # but we use the separate `qrcode` crate so we control rendering (terminal ASCII).
 totp-rs = { version = "5", features = ["gen_secret"] }
 base32 = "0.5"
+# AES-256-GCM for encrypting TOTP secrets at rest. Key comes from config or
+# ANZ_MFA_SECRET_KEY env var; absent key falls back to plaintext with a warning.
+aes-gcm = "0.10"
 # Text-only QR rendering — disable default features to avoid pulling in `image`
 # and the rest of the graphics stack.
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }

@@ -134,10 +134,17 @@ pub fn render_mfa_step(
             .min_dimensions(200, 200)
             .build();
 
+        // Encrypt the proposed secret before serialising into the challenge
+        // blob — the blob sits in sqlite until confirmation, so it needs the
+        // same at-rest protection as the long-lived user_mfa row.
+        let stored_secret = state
+            .secret_cipher
+            .encrypt(&secret_b32)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
         let challenge_state = ChallengeState {
             authorize,
             pending_enrollment: Some(PendingEnrollment {
-                secret_b32: secret_b32.clone(),
+                secret_b32: stored_secret,
                 recovery_code_hashes: recovery_hashes,
             }),
         };
@@ -242,6 +249,7 @@ pub async fn submit(
     // flow for an already-enrolled user). Recovery codes only apply to the latter.
     let verification = verify_code(
         &conn,
+        &state.secret_cipher,
         &user.id,
         &form.code,
         challenge_state.pending_enrollment.as_ref(),
@@ -360,6 +368,7 @@ struct CodeVerification {
 
 fn verify_code(
     conn: &rusqlite::Connection,
+    cipher: &crate::crypto::secret_cipher::SecretCipher,
     user_id: &str,
     submitted_code: &str,
     pending: Option<&PendingEnrollment>,
@@ -369,7 +378,10 @@ fn verify_code(
     //    user_mfa row to compare against; caller will seed last_used_step on
     //    enroll commit so the same code can't be replayed afterward.
     if let Some(p) = pending {
-        let matched = totp::verify_code(&p.secret_b32, submitted_code)
+        let plaintext = cipher
+            .decrypt(&p.secret_b32)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let matched = totp::verify_code(&plaintext, submitted_code)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         return Ok(CodeVerification {
             success: matched.is_some(),
@@ -382,7 +394,10 @@ fn verify_code(
     //    fails, try the code as a recovery code (single-use).
     let mfa = db::user_mfa::get(conn, user_id)?
         .ok_or_else(|| AppError::Internal("user_mfa missing for enrolled user".to_string()))?;
-    if let Some(step) = totp::verify_code(&mfa.secret_base32, submitted_code)
+    let secret_plain = cipher
+        .decrypt(&mfa.secret_base32)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    if let Some(step) = totp::verify_code(&secret_plain, submitted_code)
         .map_err(|e| AppError::Internal(e.to_string()))?
     {
         // Atomic replay check: only accept if this step is strictly newer than
@@ -416,8 +431,12 @@ fn rerender_with_error(
     let realm_branding = branding::load_branding(&state.config.realms_dir, realm);
 
     let html = if let Some(pending) = &challenge_state.pending_enrollment {
+        let secret_plain = state
+            .secret_cipher
+            .decrypt(&pending.secret_b32)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
         let issuer = format!("anz ({realm})");
-        let uri = totp::build_otpauth_uri(&issuer, &user.username, &pending.secret_b32);
+        let uri = totp::build_otpauth_uri(&issuer, &user.username, &secret_plain);
         let qr_svg = QrCode::new(uri.as_bytes())
             .map_err(|e| AppError::Internal(format!("qr code: {e}")))?
             .render::<svg::Color<'_>>()
@@ -426,7 +445,7 @@ fn rerender_with_error(
         EnrollTemplate {
             realm_name: realm.to_string(),
             challenge_token: challenge_token.to_string(),
-            secret: pending.secret_b32.clone(),
+            secret: secret_plain,
             qr_svg,
             // Recovery codes were only shown on the initial render; we never
             // persist the plaintext, so the retry template shows a hint to

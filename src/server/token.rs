@@ -412,7 +412,8 @@ mod tests {
             .unwrap();
         let audit = crate::audit::AuditLogger::new(false, "/dev/null");
         let config = crate::config::Config::default();
-        crate::server::build_router(config, conn, audit)
+        let cipher = std::sync::Arc::new(crate::crypto::secret_cipher::SecretCipher::noop());
+        crate::server::build_router(config, conn, audit, cipher)
     }
 
     fn token_form_request(realm: &str, body: &str) -> Request<Body> {

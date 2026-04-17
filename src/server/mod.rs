@@ -11,6 +11,7 @@ pub mod userinfo;
 
 use crate::audit::AuditLogger;
 use crate::config::Config;
+use crate::crypto::secret_cipher::SecretCipher;
 use axum::routing::{get, post};
 use axum::Router;
 use rusqlite::Connection;
@@ -28,6 +29,9 @@ pub struct AppState {
     pub login_attempts: Arc<Mutex<HashMap<IpAddr, Vec<Instant>>>>,
     /// Per-user MFA attempt tracker — keyed by user_id, separate from per-IP login limit.
     pub mfa_attempts: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
+    /// Encrypts TOTP secrets (stored in `user_mfa` and in pending-enrollment
+    /// challenge blobs). Noop if no key is configured.
+    pub secret_cipher: Arc<SecretCipher>,
 }
 
 /// Atomic "check, prune, evict, record" for a sliding-window rate limiter. Under
@@ -91,13 +95,19 @@ impl AppState {
     }
 }
 
-pub fn build_router(config: Config, conn: Connection, audit: AuditLogger) -> Router {
+pub fn build_router(
+    config: Config,
+    conn: Connection,
+    audit: AuditLogger,
+    secret_cipher: Arc<SecretCipher>,
+) -> Router {
     let state = AppState {
         db: Arc::new(Mutex::new(conn)),
         config: Arc::new(config),
         audit,
         login_attempts: Arc::new(Mutex::new(HashMap::new())),
         mfa_attempts: Arc::new(Mutex::new(HashMap::new())),
+        secret_cipher,
     };
 
     Router::new()
@@ -141,6 +151,7 @@ mod tests {
             audit: AuditLogger::new(false, "/dev/null"),
             login_attempts: Arc::new(Mutex::new(HashMap::new())),
             mfa_attempts: Arc::new(Mutex::new(HashMap::new())),
+            secret_cipher: Arc::new(SecretCipher::noop()),
         }
     }
 

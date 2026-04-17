@@ -42,6 +42,12 @@ pub struct Config {
 
     #[serde(default = "default_realms_dir")]
     pub realms_dir: String,
+
+    /// 32-byte AES-256-GCM key (64 hex chars) for encrypting TOTP secrets at
+    /// rest. `ANZ_MFA_SECRET_KEY` env var takes precedence. Absent → warning at
+    /// startup and plaintext storage for backward compatibility.
+    #[serde(default)]
+    pub mfa_secret_key_hex: Option<String>,
 }
 
 fn default_bind_address() -> String {
@@ -123,6 +129,7 @@ impl Default for Config {
             login_rate_limit_max: default_login_rate_limit_max(),
             login_rate_limit_window_secs: default_login_rate_limit_window_secs(),
             realms_dir: default_realms_dir(),
+            mfa_secret_key_hex: None,
         }
     }
 }
