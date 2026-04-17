@@ -1,17 +1,14 @@
 use std::io::Write;
 
 use anyhow::{bail, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use clap::Subcommand;
 use qrcode::render::unicode::Dense1x2;
 use qrcode::QrCode;
-use rand::RngCore;
 use rusqlite::Connection;
-use sha2::{Digest, Sha256};
 
 use crate::crypto::password::hash_password;
+use crate::crypto::tokens::generate_recovery_codes;
 use crate::crypto::totp;
-use crate::crypto::{self};
 use crate::db;
 
 #[derive(Subcommand)]
@@ -184,22 +181,11 @@ pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
 
             let (secret_b32, _) = totp::generate_secret();
             // Account label = "<realm>:<username>" so multiple realms can share an authenticator.
-            let account = user.username.to_string();
-            let issuer = format!("anz ({})", realm);
-            let uri = totp::build_otpauth_uri(&issuer, &account, &secret_b32);
+            let issuer = format!("anz ({realm})");
+            let uri = totp::build_otpauth_uri(&issuer, &user.username, &secret_b32);
 
-            // Generate 10 recovery codes. Show plaintext to the user once; persist hashes.
-            let mut recovery_plain = Vec::with_capacity(10);
-            let mut recovery_hashes = Vec::with_capacity(10);
-            for _ in 0..10 {
-                let mut bytes = [0u8; 12];
-                rand::rng().fill_bytes(&mut bytes);
-                let code = URL_SAFE_NO_PAD.encode(bytes);
-                let hash = crypto::hex_encode(&Sha256::digest(code.as_bytes()));
-                recovery_plain.push(code);
-                recovery_hashes.push(hash);
-            }
-
+            // Show plaintext to the user once; persist hashes.
+            let (recovery_plain, recovery_hashes) = generate_recovery_codes(10);
             db::user_mfa::enroll(conn, &user.id, &secret_b32, &recovery_hashes)?;
 
             // Render QR to terminal (Unicode half-block — compact and scannable).
@@ -216,7 +202,7 @@ pub fn handle(action: UserAction, conn: &Connection) -> Result<()> {
             println!();
             println!("{qr_text}");
             println!("Or enter manually:");
-            println!("  Account:   {account}");
+            println!("  Account:   {}", user.username);
             println!("  Issuer:    {issuer}");
             println!("  Secret:    {secret_b32}");
             println!("  Algorithm: SHA1, 6 digits, 30s period");

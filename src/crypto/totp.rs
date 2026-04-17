@@ -29,8 +29,9 @@ pub fn generate_secret() -> (String, Vec<u8>) {
 
 /// Verify a 6-digit code against the stored base32 secret. Tolerates one
 /// 30-second step in either direction (clock skew between the user's device
-/// and our server).
-pub fn verify_code(secret_base32: &str, code: &str) -> Result<bool> {
+/// and our server). Returns the matched step on success so callers can
+/// implement replay protection (reject any subsequent code at step ≤ matched).
+pub fn verify_code(secret_base32: &str, code: &str) -> Result<Option<i64>> {
     let raw = base32::decode(Alphabet::Rfc4648 { padding: false }, secret_base32)
         .ok_or_else(|| anyhow!("stored TOTP secret is not valid base32"))?;
     let totp = TOTP::new(Algorithm::SHA1, DIGITS, 1, STEP_SECS, raw)?;
@@ -42,13 +43,13 @@ pub fn verify_code(secret_base32: &str, code: &str) -> Result<bool> {
 
     // Try current step plus skew window in both directions.
     for offset in -SKEW_STEPS..=SKEW_STEPS {
-        let step = (current_step + offset) as u64;
-        let expected = totp.generate(step * STEP_SECS);
+        let step = current_step + offset;
+        let expected = totp.generate(step as u64 * STEP_SECS);
         if constant_time_eq(expected.as_bytes(), code.as_bytes()) {
-            return Ok(true);
+            return Ok(Some(step));
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
 /// Build an `otpauth://` URI for QR/manual entry into the user's authenticator app.
@@ -99,13 +100,21 @@ mod tests {
         let (b32, raw) = generate_secret();
         let totp = TOTP::new(Algorithm::SHA1, DIGITS, 1, STEP_SECS, raw).unwrap();
         let code = totp.generate_current().unwrap();
-        assert!(verify_code(&b32, &code).unwrap());
+        let matched = verify_code(&b32, &code).unwrap();
+        assert!(matched.is_some());
+        let now_step = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64)
+            / STEP_SECS as i64;
+        // Must match current step (not a skew neighbor).
+        assert_eq!(matched, Some(now_step));
     }
 
     #[test]
     fn verify_rejects_bogus_code() {
         let (b32, _) = generate_secret();
-        assert!(!verify_code(&b32, "000000").unwrap());
+        assert!(verify_code(&b32, "000000").unwrap().is_none());
     }
 
     #[test]

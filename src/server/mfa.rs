@@ -12,11 +12,9 @@ use axum::http::header::SET_COOKIE;
 use axum::http::HeaderMap;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Form;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
 use qrcode::render::svg;
 use qrcode::QrCode;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
@@ -26,6 +24,7 @@ use super::error::AppError;
 use super::AppState;
 use crate::audit::{AuditAction, LogEventParams};
 use crate::branding;
+use crate::crypto::tokens::{generate_random_token, generate_recovery_codes};
 use crate::crypto::{self, totp};
 use crate::db;
 use crate::models::User;
@@ -235,7 +234,7 @@ pub async fn submit(
         )));
     }
 
-    let challenge_state: ChallengeState = serde_json::from_str(&challenge.authorize_params)
+    let challenge_state: ChallengeState = serde_json::from_str(&challenge.challenge_state)
         .map_err(|e| AppError::Internal(format!("corrupt challenge state: {e}")))?;
 
     // Verify the submitted code. The TOTP secret comes from either the pending
@@ -261,7 +260,6 @@ pub async fn submit(
         // Re-render the same page with an error. Keep the challenge alive so the
         // user can retry without going back through password.
         return rerender_with_error(
-            &conn,
             &state,
             &realm,
             &user,
@@ -280,6 +278,11 @@ pub async fn submit(
             &pending.secret_b32,
             &pending.recovery_code_hashes,
         )?;
+        // Seed last_used_step with the step the confirmation code matched, so
+        // replaying it (or any earlier skew-neighbor step) is rejected.
+        if let Some(step) = verification.matched_step {
+            db::user_mfa::advance_step(&conn, &user.id, step)?;
+        }
         state.audit.log_event(LogEventParams {
             realm: &realm,
             action: AuditAction::MfaEnrolled,
@@ -350,6 +353,9 @@ pub async fn submit(
 struct CodeVerification {
     success: bool,
     was_recovery: bool,
+    /// Matched TOTP step, if the success came from a TOTP code (not a recovery
+    /// code). Used by the caller to advance `last_used_step` and block replays.
+    matched_step: Option<i64>,
 }
 
 fn verify_code(
@@ -358,27 +364,34 @@ fn verify_code(
     submitted_code: &str,
     pending: Option<&PendingEnrollment>,
 ) -> Result<CodeVerification, AppError> {
-    // 1. If we have a pending enrollment, only TOTP is checked (no recovery codes
-    //    yet — the user hasn't confirmed they have any).
+    // 1. Pending enrollment: only TOTP is checked (no recovery codes yet — the
+    //    user hasn't confirmed they have any). No replay check: there's no
+    //    user_mfa row to compare against; caller will seed last_used_step on
+    //    enroll commit so the same code can't be replayed afterward.
     if let Some(p) = pending {
-        let ok = totp::verify_code(&p.secret_b32, submitted_code)
+        let matched = totp::verify_code(&p.secret_b32, submitted_code)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         return Ok(CodeVerification {
-            success: ok,
+            success: matched.is_some(),
             was_recovery: false,
+            matched_step: matched,
         });
     }
 
-    // 2. Already enrolled. Try TOTP first. If that fails, try the code as a
-    //    recovery code (single-use).
+    // 2. Already enrolled. Try TOTP (with replay protection) first. If that
+    //    fails, try the code as a recovery code (single-use).
     let mfa = db::user_mfa::get(conn, user_id)?
         .ok_or_else(|| AppError::Internal("user_mfa missing for enrolled user".to_string()))?;
-    if totp::verify_code(&mfa.secret_base32, submitted_code)
+    if let Some(step) = totp::verify_code(&mfa.secret_base32, submitted_code)
         .map_err(|e| AppError::Internal(e.to_string()))?
     {
+        // Atomic replay check: only accept if this step is strictly newer than
+        // any previously accepted step for the user.
+        let advanced = db::user_mfa::advance_step(conn, user_id, step)?;
         return Ok(CodeVerification {
-            success: true,
+            success: advanced,
             was_recovery: false,
+            matched_step: if advanced { Some(step) } else { None },
         });
     }
 
@@ -388,11 +401,11 @@ fn verify_code(
     Ok(CodeVerification {
         success: consumed,
         was_recovery: consumed,
+        matched_step: None,
     })
 }
 
 fn rerender_with_error(
-    _conn: &rusqlite::Connection,
     state: &AppState,
     realm: &str,
     user: &User,
@@ -442,24 +455,4 @@ fn rerender_with_error(
     };
 
     Ok(Html(html).into_response())
-}
-
-fn generate_random_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut bytes);
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn generate_recovery_codes(n: usize) -> (Vec<String>, Vec<String>) {
-    let mut plain = Vec::with_capacity(n);
-    let mut hashes = Vec::with_capacity(n);
-    for _ in 0..n {
-        let mut bytes = [0u8; 12];
-        rand::rng().fill_bytes(&mut bytes);
-        let code = URL_SAFE_NO_PAD.encode(bytes);
-        let hash = crypto::hex_encode(&Sha256::digest(code.as_bytes()));
-        plain.push(code);
-        hashes.push(hash);
-    }
-    (plain, hashes)
 }

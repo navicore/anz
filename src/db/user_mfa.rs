@@ -57,12 +57,14 @@ fn enroll_inner(
 }
 
 pub fn get(conn: &Connection, user_id: &str) -> Result<Option<UserMfa>> {
-    let mut stmt =
-        conn.prepare("SELECT user_id, secret_base32 FROM user_mfa WHERE user_id = ?1")?;
+    let mut stmt = conn.prepare(
+        "SELECT user_id, secret_base32, last_used_step FROM user_mfa WHERE user_id = ?1",
+    )?;
     let mut rows = stmt.query_map(params![user_id], |row| {
         Ok(UserMfa {
             user_id: row.get(0)?,
             secret_base32: row.get(1)?,
+            last_used_step: row.get(2)?,
         })
     })?;
     match rows.next() {
@@ -92,6 +94,23 @@ pub fn disable(conn: &Connection, user_id: &str) -> Result<bool> {
             Err(e)
         }
     }
+}
+
+/// Atomically advance `last_used_step` if `step` is strictly greater than the
+/// currently-stored value. Returns true if the step was accepted (no replay),
+/// false if the supplied step has already been used (replay — reject).
+///
+/// This is the server-side half of TOTP replay protection: a valid TOTP code
+/// matches one specific step; once we've accepted step N, any subsequent
+/// submission matching step ≤ N is a replay, even if the clock still considers
+/// the code mathematically valid.
+pub fn advance_step(conn: &Connection, user_id: &str, step: i64) -> Result<bool> {
+    let rows = conn.execute(
+        "UPDATE user_mfa SET last_used_step = ?2
+         WHERE user_id = ?1 AND ?2 > last_used_step",
+        params![user_id, step],
+    )?;
+    Ok(rows > 0)
 }
 
 /// Try to consume a recovery code by its hash. Returns true if a matching
@@ -134,6 +153,30 @@ mod tests {
         let got = get(&conn, &user_id).unwrap().unwrap();
         assert_eq!(got.user_id, user_id);
         assert_eq!(got.secret_base32, "JBSWY3DPEHPK3PXP");
+        assert_eq!(got.last_used_step, 0);
+    }
+
+    #[test]
+    fn advance_step_rejects_replay() {
+        let (conn, user_id) = setup();
+        enroll(&conn, &user_id, "S", &[]).unwrap();
+
+        assert!(advance_step(&conn, &user_id, 100).unwrap());
+        assert_eq!(get(&conn, &user_id).unwrap().unwrap().last_used_step, 100);
+
+        // Same step → replay, rejected.
+        assert!(!advance_step(&conn, &user_id, 100).unwrap());
+        // Earlier step → replay (skew neighbor already used), rejected.
+        assert!(!advance_step(&conn, &user_id, 99).unwrap());
+        // Later step → accepted.
+        assert!(advance_step(&conn, &user_id, 101).unwrap());
+        assert_eq!(get(&conn, &user_id).unwrap().unwrap().last_used_step, 101);
+    }
+
+    #[test]
+    fn advance_step_noop_for_unknown_user() {
+        let conn = db::open_in_memory().unwrap();
+        assert!(!advance_step(&conn, "nobody", 1).unwrap());
     }
 
     #[test]

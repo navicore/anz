@@ -14,16 +14,16 @@ pub fn create(
     conn: &Connection,
     challenge_token_hash: &str,
     user_id: &str,
-    authorize_params: &str,
+    challenge_state: &str,
     expires_at: DateTime<Utc>,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO mfa_challenges (challenge_token_hash, user_id, authorize_params, expires_at)
+        "INSERT INTO mfa_challenges (challenge_token_hash, user_id, challenge_state, expires_at)
          VALUES (?1, ?2, ?3, ?4)",
         params![
             challenge_token_hash,
             user_id,
-            authorize_params,
+            challenge_state,
             expires_at.to_rfc3339(),
         ],
     )?;
@@ -35,14 +35,14 @@ pub fn create(
 pub fn get(conn: &Connection, challenge_token_hash: &str) -> Result<Option<MfaChallenge>> {
     let now = Utc::now().to_rfc3339();
     let mut stmt = conn.prepare(
-        "SELECT user_id, authorize_params
+        "SELECT user_id, challenge_state
          FROM mfa_challenges
          WHERE challenge_token_hash = ?1 AND expires_at > ?2",
     )?;
     let mut rows = stmt.query_map(params![challenge_token_hash, now], |row| {
         Ok(MfaChallenge {
             user_id: row.get(0)?,
-            authorize_params: row.get(1)?,
+            challenge_state: row.get(1)?,
         })
     })?;
     match rows.next() {
@@ -94,7 +94,7 @@ mod tests {
 
         let got = get(&conn, "h1").unwrap().unwrap();
         assert_eq!(got.user_id, user_id);
-        assert_eq!(got.authorize_params, "params");
+        assert_eq!(got.challenge_state, "params");
 
         delete(&conn, "h1").unwrap();
         assert!(get(&conn, "h1").unwrap().is_none());

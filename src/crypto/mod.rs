@@ -3,6 +3,7 @@ pub mod keys;
 pub mod password;
 pub mod pkce;
 pub mod token;
+pub mod tokens;
 pub mod totp;
 
 pub fn hex_encode(bytes: &[u8]) -> String {
