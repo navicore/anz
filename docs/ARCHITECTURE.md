@@ -32,8 +32,8 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 |---|---|
 | `cli/` | Parses commands (clap) and dispatches to `serve`, `realm`, `user`, `client`, `session` subcommands |
 | `server/` | Axum router and handlers for all OIDC endpoints: authorize, token, jwks, discovery, userinfo, password, revoke, mfa, static_files |
-| `db/` | SQLite schema (10 tables), migrations, and CRUD for realms, users, clients, auth codes, refresh tokens, sessions, signing keys, user_mfa, mfa_recovery_codes, mfa_challenges |
-| `crypto/` | Ed25519/RSA key generation and JWK conversion, Argon2id hashing, PKCE S256 verification, CSRF tokens, JWT encoding/decoding, TOTP verification |
+| `db/` | SQLite schema (10 tables), migrations, and CRUD for realms, users, clients, auth codes, refresh tokens, sessions, signing keys, user_mfa, user_mfa_recovery_codes, mfa_challenges |
+| `crypto/` | Ed25519/RSA key generation and JWK conversion, Argon2id hashing, PKCE S256 verification, CSRF tokens, JWT encoding/decoding, TOTP verification, AES-256-GCM encryption for TOTP secrets at rest (`secret_cipher`) |
 | `config.rs` | TOML configuration loading with defaults |
 | `models.rs` | Shared domain types (Realm, User, Client, AuthorizationCode, RefreshToken, Session, SigningKey) |
 | `audit.rs` | JSON-line audit event logging to file |
@@ -52,15 +52,15 @@ These choices optimize for operational simplicity: one binary, one file, no exte
 
 ### Shared State
 
-`AppState` holds the SQLite connection (`Arc<Mutex<Connection>>`), config, audit logger, and an in-memory login attempt tracker for rate limiting.
+`AppState` holds the SQLite connection (`Arc<Mutex<Connection>>`), config, audit logger, in-memory login and MFA attempt trackers for rate limiting, and a `SecretCipher` for TOTP secret encryption at rest.
 
 ## Crosscutting Concepts
 
 **Error handling:** `AppError` enum maps domain errors to HTTP status codes (400, 401, 404, 429, 500). Uses `thiserror` for the enum and `anyhow` for internal propagation. JSON `{"error": "..."}` responses.
 
-**Token/code storage:** Authorization codes, refresh tokens, and client secrets are never stored in plaintext. The database holds SHA-256 hashes; lookup is by hash.
+**Token/code storage:** Authorization codes, refresh tokens, client secrets, session tokens, MFA challenge tokens, and MFA recovery codes are never stored in plaintext. The database holds SHA-256 hashes; lookup is by hash. TOTP shared secrets must be recoverable to verify codes, so they are encrypted at rest with AES-256-GCM using a key supplied via the `ANZ_MFA_SECRET_KEY` env var or `mfa_secret_key_hex` config value; without a key configured, they fall back to plaintext storage with a startup warning.
 
-**Rate limiting:** Login attempts are tracked per IP address in memory. Default: 5 attempts per 5-minute window, returning 429 when exceeded.
+**Rate limiting:** Login attempts are tracked per IP address in memory (default: 5 per 5-minute window). MFA verification attempts are tracked separately per user (5 per 5-minute window) so brute-forcing a 6-digit TOTP code is infeasible within its 30-second step. Both return 429 when exceeded.
 
 **Logging:** Structured logging via `tracing`. Level controlled by `RUST_LOG` env var. Audit events are separate — JSON lines written to a configurable log file.
 

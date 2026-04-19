@@ -10,7 +10,7 @@ anz implements a complete OIDC provider targeting SSO for Forgejo, Kubernetes, a
 - Confidential client support (client_secret via `--secret` flag)
 - Groups claim in ID tokens and UserInfo (for Kubernetes RBAC)
 - Per-IP login + per-user MFA rate limiting, audit logging, per-realm branding
-- 87 tests covering crypto, DB, config, audit, branding, rate limiting, MFA, and HTTP-level behavior
+- 98 tests covering crypto, DB, config, audit, branding, rate limiting, MFA, and HTTP-level behavior
 
 See [docs/design/done/sso-readiness.md](design/done/sso-readiness.md) for the SSO integration design.
 
