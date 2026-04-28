@@ -1,3 +1,8 @@
+<!-- ghmig:moved -->
+> **This repository has moved to [https://git.navicore.tech/navicore/anz](https://git.navicore.tech/navicore/anz).**
+>
+> The GitHub copy is archived and no longer maintained.
+
 # anz
 
 A minimal, personal OIDC provider written in Rust. Secures personal web
